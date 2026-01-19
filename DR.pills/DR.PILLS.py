@@ -4,7 +4,6 @@ import pandas as pd
 from datetime import date, datetime, timedelta, time
 import calendar
 import json
-import plotly.graph_objects as go
 from typing import List, Dict, Optional
 import os
 
@@ -275,6 +274,47 @@ st.markdown("""
         margin: 2px 0;
         border-left: 3px solid #b144ff;
         color: #333;
+    }
+    
+    /* Bar chart styling */
+    .bar-chart {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-around;
+        height: 300px;
+        padding: 20px;
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    .bar-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        flex: 1;
+        margin: 0 5px;
+    }
+    
+    .bar {
+        width: 60px;
+        background: linear-gradient(180deg, #b144ff 0%, #9b59b6 100%);
+        border-radius: 10px 10px 0 0;
+        transition: height 0.5s ease;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        padding-bottom: 5px;
+        color: white;
+        font-weight: bold;
+        font-size: 1rem;
+    }
+    
+    .bar-label {
+        margin-top: 10px;
+        font-weight: bold;
+        color: #666;
+        font-size: 1.1rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -732,6 +772,35 @@ def get_medicine_status(medicine, time_slot, current_time, user_id):
         return 'upcoming'
     
     return 'scheduled'
+
+def render_bar_chart(weekly_data):
+    """Render a custom bar chart without plotly"""
+    chart_html = '<div class="bar-chart">'
+    
+    for day, value in weekly_data.items():
+        # Determine bar color based on adherence
+        if value >= 80:
+            bar_color = 'linear-gradient(180deg, #81c784 0%, #66bb6a 100%)'
+        elif value >= 50:
+            bar_color = 'linear-gradient(180deg, #ffd54f 0%, #ffc107 100%)'
+        else:
+            bar_color = 'linear-gradient(180deg, #e57373 0%, #f44336 100%)'
+        
+        # Calculate height (percentage)
+        height = max(value, 5)  # Minimum 5% height
+        
+        chart_html += f'''
+        <div class="bar-container">
+            <div class="bar" style="height: {height}px; background: {bar_color};">
+                {value}%
+            </div>
+            <div class="bar-label">{day}</div>
+        </div>
+        '''
+    
+    chart_html += '</div>'
+    
+    st.markdown(chart_html, unsafe_allow_html=True)
 
 
 # ================= SESSION STATE =================
@@ -1562,31 +1631,8 @@ elif st.session_state.user and st.session_state.page == "calendar":
     
     weekly_data = calculate_weekly_adherence(user_id)
     
-    # Create bar chart
-    weekly_values = list(weekly_data.values())
-    marker_colors = ['#81c784' if v >= 80 else '#ffd54f' if v >= 50 else '#e57373' for v in weekly_values]
-    
-    fig = go.Figure(data=[
-        go.Bar(
-            x=list(weekly_data.keys()),
-            y=weekly_values,
-            marker_color=marker_colors,
-            text=weekly_values,
-            texttemplate='%{text}%',
-            textposition='outside'
-        )
-    ])
-    
-    fig.update_layout(
-        title="Last 7 Days Adherence",
-        xaxis_title="Day",
-        yaxis_title="Adherence %",
-        yaxis_range=[0, 105],
-        height=400,
-        showlegend=False
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
+    # Use custom bar chart instead of plotly
+    render_bar_chart(weekly_data)
 
 # ================= SETTINGS PAGE =================
 elif st.session_state.user and st.session_state.page == "settings":
