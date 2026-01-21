@@ -3,10 +3,6 @@ import sqlite3
 import pandas as pd
 from datetime import date, datetime, timedelta, time
 import calendar
-import json
-import plotly.graph_objects as go
-from typing import List, Dict, Optional
-import os
 
 # ================= PAGE CONFIG =================
 st.set_page_config(
@@ -116,23 +112,28 @@ st.markdown("""
         margin: 2rem 0;
     }
     
-    .mascot {
-        font-size: 8rem;
+    /* Emoji Mascot Styles */
+    .emoji-mascot {
+        font-size: 10rem;
+        display: inline-block;
         animation: bounce 2s infinite;
     }
     
-    .mascot-sad {
-        font-size: 8rem;
+    .emoji-mascot-sad {
+        font-size: 10rem;
+        display: inline-block;
         animation: sway 2s infinite;
     }
     
-    .mascot-urgent {
-        font-size: 8rem;
+    .emoji-mascot-urgent {
+        font-size: 10rem;
+        display: inline-block;
         animation: shake 0.5s infinite;
     }
     
-    .mascot-sleepy {
-        font-size: 8rem;
+    .emoji-mascot-sleepy {
+        font-size: 10rem;
+        display: inline-block;
         animation: rotate 3s infinite;
     }
     
@@ -275,12 +276,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ================= DATABASE ====================
-@st.cache_resource
 def init_db():
+    """Initialize database and create tables"""
     conn = sqlite3.connect("drpill.db", check_same_thread=False)
     cursor = conn.cursor()
     
-    # Create users table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -294,7 +294,6 @@ def init_db():
     )
     """)
     
-    # Create medicines table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS medicines (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -313,7 +312,6 @@ def init_db():
     )
     """)
     
-    # Create tracking table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS tracking (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -326,7 +324,6 @@ def init_db():
     )
     """)
     
-    # Create settings table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS settings (
         user_id INTEGER PRIMARY KEY,
@@ -344,34 +341,15 @@ cursor = conn.cursor()
 
 # ================= DB FUNCTIONS =================
 def create_user(name, email, password, age, conditions="", phone="", email_address=""):
-    try:
-        # Check if email already exists
-        cursor.execute("SELECT id FROM users WHERE email=?", (email,))
-        existing = cursor.fetchone()
-        
-        if existing:
-            print(f"Email {email} already exists in database")
-            return False
-        
-        # Insert new user
-        cursor.execute(
-            "INSERT INTO users (name, email, password, age, conditions, phone, email_address) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name, email, password, age, conditions, phone, email_address)
-        )
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError as e:
-        print(f"IntegrityError: {e}")
-        return False
-    except Exception as e:
-        print(f"Error creating user: {e}")
-        return False
+    cursor.execute(
+        "INSERT INTO users (name, email, password, age, conditions, phone, email_address) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (name, email, password, age, conditions, phone, email_address)
+    )
+    conn.commit()
+    return True
 
 def login_user(email, password):
-    cursor.execute(
-        "SELECT * FROM users WHERE email=? AND password=?",
-        (email, password)
-    )
+    cursor.execute("SELECT * FROM users WHERE email=? AND password=?", (email, password))
     return cursor.fetchone()
 
 def get_user_by_id(user_id):
@@ -527,14 +505,29 @@ def calculate_weekly_adherence(user_id):
     
     return weekly_data
 
+def calculate_monthly_adherence(user_id):
+    monthly_data = {}
+    today = date.today()
+    
+    first_day = today.replace(day=1)
+    days_in_month = (today.replace(day=28) + timedelta(days=4)).day
+    
+    for day in range(1, days_in_month + 1):
+        target_date = today.replace(day=day).strftime('%Y-%m-%d')
+        check_date = today.replace(day=day)
+        if check_date <= today:
+            adherence = calculate_adherence(user_id, target_date)
+            monthly_data[target_date] = adherence
+    
+    return monthly_data
+
 def get_adherence_stats(user_id):
     today = date.today().strftime("%Y-%m-%d")
     today_adherence = calculate_adherence(user_id, today)
     medicines = get_user_medicines(user_id)
     total_meds = len(medicines)
-    active_meds = len([m for m in medicines if not m[10]])  # m[10] is paused
+    active_meds = len([m for m in medicines if not m[10]])
     
-    # Get adherence for last 7 days
     last_7_days = []
     for i in range(7):
         d = date.today()
@@ -544,7 +537,16 @@ def get_adherence_stats(user_id):
     
     avg_adherence = sum(last_7_days) / len(last_7_days) if last_7_days else 100
     
-    # Get 30-day adherence
+    weekly_data = calculate_weekly_adherence(user_id)
+    weekly_avg = sum(weekly_data.values()) / len(weekly_data) if weekly_data else 100
+    weekly_best = max(weekly_data.values()) if weekly_data else 100
+    weekly_worst = min(weekly_data.values()) if weekly_data else 100
+    
+    monthly_data = calculate_monthly_adherence(user_id)
+    monthly_avg = sum(monthly_data.values()) / len(monthly_data) if monthly_data else 100
+    monthly_best = max(monthly_data.values()) if monthly_data else 100
+    monthly_worst = min(monthly_data.values()) if monthly_data else 100
+    
     total_scheduled_30d = 0
     total_taken_30d = 0
     for i in range(30):
@@ -569,7 +571,15 @@ def get_adherence_stats(user_id):
         'active_medicines': active_meds,
         'avg_adherence': int(avg_adherence),
         'last_7_days': last_7_days,
-        'overall_adherence': overall_adherence
+        'overall_adherence': overall_adherence,
+        'weekly_data': weekly_data,
+        'weekly_avg': int(weekly_avg),
+        'weekly_best': int(weekly_best),
+        'weekly_worst': int(weekly_worst),
+        'monthly_data': monthly_data,
+        'monthly_avg': int(monthly_avg),
+        'monthly_best': int(monthly_best),
+        'monthly_worst': int(monthly_worst)
     }
 
 def get_settings(user_id):
@@ -581,7 +591,6 @@ def get_settings(user_id):
             'reminder_advance_minutes': result[2]
         }
     else:
-        # Create default settings
         cursor.execute(
             "INSERT INTO settings (user_id, reminders_enabled, reminder_advance_minutes) VALUES (?, 1, 30)",
             (user_id,)
@@ -605,7 +614,6 @@ def get_upcoming_reminders(user_id):
     upcoming = []
     for medicine in today_medicines:
         for time_slot in medicine['times']:
-            # Check if not taken yet
             is_taken = get_intake_status(medicine['id'], today, time_slot)
             
             if not is_taken:
@@ -627,142 +635,211 @@ def get_upcoming_reminders(user_id):
     
     return sorted(upcoming, key=lambda x: x['minutes_until'])
 
-def export_user_data(user_id):
+def get_health_tips(adherence_stats):
+    tips = []
+    
+    general_tips = [
+        "💊 Always take your medicine at the same time each day to build a habit",
+        "⏰ Set multiple alarms or reminders for different medications",
+        "📱 Use a pill organizer to sort your weekly medications in advance",
+        "🥚 Take some medicines with food to reduce stomach upset",
+        "💧 Drink plenty of water when swallowing pills",
+        "📝 Keep a medication journal to track side effects or improvements",
+        "👨‍⚕️ Regularly review your medications with your doctor",
+        "🏃‍♂️ A healthy lifestyle complements your medication routine",
+        "😴 Good sleep helps your body heal and medications work better",
+        "🧘‍♀️ Stress management can improve treatment outcomes",
+        "🍎 A balanced diet supports overall health and medication effectiveness",
+        "🚶‍♂️ Regular exercise can boost your immune system",
+        "📅 Never skip doses without consulting your doctor",
+        "🔄 If you miss a dose, ask your doctor what to do",
+        "🧬 Understand why you're taking each medication",
+        "👥 Inform family members about your medication schedule",
+        "🌡️ Store medications properly - some need refrigeration",
+        "📋 Keep an updated list of all medications you take",
+        "✈️ Plan ahead when traveling with medications",
+        "🎯 Set realistic health goals and celebrate small wins"
+    ]
+    
+    tips.extend(general_tips[:5])
+    
+    if adherence_stats['weekly_avg'] >= 90:
+        tips.append("🏆 Excellent adherence! You're a role model for medication management!")
+        tips.append("⭐ Consider helping others with their medication routines")
+    elif adherence_stats['weekly_avg'] >= 75:
+        tips.append("👍 Great job! You're doing well, aim for consistency")
+        tips.append("📈 Small improvements each week will lead to big results")
+    elif adherence_stats['weekly_avg'] >= 50:
+        tips.append("⚡ Focus on consistency - same time, every day")
+        tips.append("🎯 Try setting up a daily routine for your medications")
+    else:
+        tips.append("💡 Let's work on improving together - set reminders today!")
+        tips.append("🆘 Don't hesitate to ask your doctor for help with routine")
+    
+    if adherence_stats['weekly_best'] >= 90:
+        tips.append("✨ Your best adherence days show your potential - replicate that success!")
+    
+    if adherence_stats['weekly_worst'] < adherence_stats['weekly_best'] - 20:
+        tips.append("📊 Identify what works on your best days and apply it consistently")
+    
+    if adherence_stats['monthly_avg'] >= 85:
+        tips.append("🌟 Your monthly consistency is impressive - keep it up!")
+    
+    if adherence_stats['total_medicines'] > 5:
+        tips.append("📋 With multiple medications, consider a pill organizer")
+        tips.append("⏰ Stagger medication times to avoid overwhelming moments")
+    
+    return tips[:10]
+
+def generate_text_report(user_id):
+    """Generate a text-based report instead of PDF"""
     user = get_user_by_id(user_id)
     medicines = get_user_medicines(user_id)
+    stats = get_adherence_stats(user_id)
     
-    tracking_data = []
-    for med in medicines:
-        cursor.execute("SELECT * FROM tracking WHERE medicine_id=?", (med[0],))
-        tracking_data.extend(cursor.fetchall())
-    
-    data = {
-        'user': {
-            'name': user[1],
-            'email': user[2],
-            'age': user[4],
-            'conditions': user[5],
-            'phone': user[6],
-            'email_address': user[7]
-        },
-        'medicines': [
-            {
-                'id': m[0],
-                'name': m[2],
-                'dosage': m[3],
-                'med_type': m[4],
-                'times': m[5],
-                'time_labels': m[6],
-                'notes': m[7],
-                'start_date': m[8],
-                'end_date': m[9],
-                'paused': m[10],
-                'color': m[11]
-            }
-            for m in medicines
-        ],
-        'tracking': [
-            {
-                'medicine_id': t[1],
-                'date': t[2],
-                'time_slot': t[3],
-                'taken': t[4],
-                'timestamp': t[5]
-            }
-            for t in tracking_data
-        ]
-    }
-    return json.dumps(data, indent=2)
+    report = f"""
+=====================================================
+            Dr.PILL MEDICINE TRACKER REPORT
+=====================================================
+Generated: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}
+=====================================================
 
-# ================= MASCOT CONFIGURATION =================
-# Configure mascot paths - update these paths based on your actual folder structure
-def get_mascot_path(emotion):
-    """
-    Get the path to mascot image based on emotion.
-    
-    Adjust these paths to match your actual folder structure.
-    Common patterns:
-    - If mascot folder is in the same directory as this script: "mascots/happy_pill.png"
-    - If mascot folder is in dr.pill folder: "dr.pill/mascots/happy_pill.png"
-    - If mascot folder is in parent folder: "../mascots/happy_pill.png"
-    """
-    
-    # Define your mascot image paths here
-    # You can use absolute paths or relative paths
-    # Example relative path from script location:
-    
-    mascot_paths = {
-        'happy': 'mascots/waving pill.png',           # Update this path
-        'sad': 'mascots/sad pill.png',               # Update this path
-        'urgent': 'mascots/Angry pill.png',          # Update this path
-        'sleepy': 'mascots/Doubt pill.png'           # Update this path
-    }
-    
-    # Get the path for the requested emotion
-    path = mascot_paths.get(emotion, mascot_paths['happy'])
-    
-    # Try to construct absolute path
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    abs_path = os.path.join(script_dir, path)
-    
-    # If file doesn't exist at the expected location, show debug info
-    if not os.path.exists(abs_path):
-        st.warning(f"Mascot image not found at: {abs_path}")
-        st.info(f"Current working directory: {os.getcwd()}")
-        st.info(f"Script directory: {script_dir}")
-        return None
-    
-    return abs_path
+USER INFORMATION
+----------------
+Name: {user[1] if user else 'N/A'}
+Email: {user[2] if user else 'N/A'}
+Age: {user[4] if user else 'N/A'} years
+Phone: {user[6] if user and user[6] else 'N/A'}
+Health Conditions: {user[5] if user and user[5] else 'None reported'}
 
-def get_mascot_css_class(emotion):
-    """Get CSS class for mascot animation"""
-    css_classes = {
-        'happy': 'mascot',
-        'sad': 'mascot-sad',
-        'urgent': 'mascot-urgent',
-        'sleepy': 'mascot-sleepy'
-    }
-    return css_classes.get(emotion, 'mascot')
+=====================================================
 
-def render_pill_mascot(emotion, message, missed_list=None):
-    """Render the pill mascot with different emotions"""
+ADHERENCE STATISTICS
+--------------------
+Today's Adherence: {stats['today_adherence']}%
+Average Adherence (7 days): {stats['avg_adherence']}%
+Overall Adherence (30 days): {stats['overall_adherence']}%
+Total Medicines: {stats['total_medicines']}
+Active Medicines: {stats['active_medicines']}
+
+=====================================================
+
+WEEKLY ADHERENCE (LAST 7 DAYS)
+------------------------------
+"""
+    for day, rate in stats['weekly_data'].items():
+        report += f"{day}: {rate}%\n"
     
-    # Get mascot image path
-    img_path = get_mascot_path(emotion)
-    
-    # Get CSS class for animation
-    css_class = get_mascot_css_class(emotion)
-    
-    if img_path and os.path.exists(img_path):
-        # Render with actual image
-        st.markdown(f"""
-        <div class="mascot-container">
-            <div class="{css_class}">
-                <img src="file://{img_path}" style="width:160px; border-radius: 10px;">
-            </div>
-            <h2 style="color: #9c27b0; margin-top: 1rem;">{message}</h2>
-        </div>
-        """, unsafe_allow_html=True)
+    report += f"""
+Average: {stats['weekly_avg']}%
+Best Day: {stats['weekly_best']}%
+Worst Day: {stats['weekly_worst']}%
+
+=====================================================
+
+MONTHLY ADHERENCE (THIS MONTH)
+------------------------------
+Average: {stats['monthly_avg']}%
+Best Day: {stats['monthly_best']}%
+Worst Day: {stats['monthly_worst']}%
+Days Tracked: {len(stats['monthly_data'])}
+
+=====================================================
+
+CURRENT MEDICATIONS
+-------------------
+"""
+    if medicines:
+        for idx, med in enumerate(medicines, 1):
+            med_id, user_id_val, name, dosage, med_type, times_str, time_labels_str, notes, start_date, end_date, paused, color = med
+            time_slots = [t.strip() for t in times_str.split(",") if t.strip()]
+            time_labels = [l.strip() for l in time_labels_str.split(",") if l.strip()] if time_labels_str else [""] * len(time_slots)
+            
+            report += f"""
+{idx}. {name}
+   Dosage: {dosage}
+   Type: {med_type}
+   Times: {', '.join([f'{t} ({l})' for t, l in zip(time_slots, time_labels)])}
+   Status: {'Paused' if paused else 'Active'}
+   Notes: {notes if notes else 'None'}
+   Start Date: {start_date if start_date else 'N/A'}
+   End Date: {end_date if end_date else 'Ongoing'}
+"""
     else:
-        # Fallback to emoji if image not found
-        emoji_map = {
-            'happy': '😊',
-            'sad': '😢',
-            'urgent': '😰',
-            'sleepy': '😴'
-        }
-        fallback_emoji = emoji_map.get(emotion, '💊')
-        
-        st.markdown(f"""
-        <div class="mascot-container">
-            <div class="{css_class}" style="font-size: 8rem;">
-                {fallback_emoji}
-            </div>
-            <h2 style="color: #9c27b0; margin-top: 1rem;">{message}</h2>
-            <p style="color: #666;">(Mascot image not loaded - using emoji fallback)</p>
-        </div>
-        """, unsafe_allow_html=True)
+        report += "No medications found in your records.\n"
+    
+    report += """
+=====================================================
 
+RECENT INTAKE HISTORY (LAST 30 DAYS)
+-------------------------------------
+"""
+    has_history = False
+    for i in range(30):
+        check_date = (date.today() - timedelta(days=i)).strftime('%Y-%m-%d')
+        meds_for_date = get_medicines_for_date(user_id, check_date)
+        
+        for med in meds_for_date:
+            for time_slot in med['times']:
+                cursor.execute(
+                    "SELECT taken, timestamp FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
+                    (med['id'], check_date, time_slot)
+                )
+                result = cursor.fetchone()
+                
+                if result:
+                    has_history = True
+                    is_taken, timestamp = result
+                    status = "Taken" if is_taken else "Missed"
+                    taken_at = timestamp.strftime('%I:%M %p') if timestamp else "N/A"
+                    
+                    report += f"{check_date} - {med['name']} - {time_slot} - {status} - {taken_at}\n"
+    
+    if not has_history:
+        report += "No intake history found for the last 30 days.\n"
+    
+    report += """
+=====================================================
+
+Disclaimer: This report was generated automatically by Dr.Pill Medicine Tracker.
+Please consult your healthcare provider for medical advice.
+=====================================================
+"""
+    
+    return report
+
+# ================= MASCOT FUNCTIONS =================
+def render_emoji_mascot(emotion, message, missed_list=None):
+    mascot_data = {
+        'happy': {
+            'emoji': '💊',
+            'css_class': 'emoji-mascot'
+        },
+        'sad': {
+            'emoji': '😢',
+            'css_class': 'emoji-mascot-sad'
+        },
+        'urgent': {
+            'emoji': '😰',
+            'css_class': 'emoji-mascot-urgent'
+        },
+        'sleepy': {
+            'emoji': '😴',
+            'css_class': 'emoji-mascot-sleepy'
+        }
+    }
+    
+    data = mascot_data.get(emotion, mascot_data['happy'])
+    
+    st.markdown(f"""
+    <div class="mascot-container">
+        <div class="{data['css_class']}">
+            {data['emoji']}
+        </div>
+        <h2 style="color: #9c27b0; margin-top: 1rem;">{message}</h2>
+    </div>
+    """, unsafe_allow_html=True)
+    
     if missed_list:
         st.markdown("### 📋 Missed Today:")
         for med in missed_list:
@@ -773,18 +850,14 @@ def render_pill_mascot(emotion, message, missed_list=None):
             </div>
             """, unsafe_allow_html=True)
 
-
 # ================= HELPER FUNCTIONS =================
 def get_medicine_status(medicine, time_slot, current_time, user_id):
-    """Determine the status of a medicine at a specific time"""
     today = datetime.now().strftime('%Y-%m-%d')
     settings = get_settings(user_id)
     
-    # Check if taken
     if get_intake_status(medicine['id'], today, time_slot):
         return 'taken'
     
-    # Check if missed or upcoming
     current_minutes = current_time.hour * 60 + current_time.minute
     time_parts = time_slot.split(':')
     medicine_minutes = int(time_parts[0]) * 60 + int(time_parts[1])
@@ -795,7 +868,6 @@ def get_medicine_status(medicine, time_slot, current_time, user_id):
         return 'upcoming'
     
     return 'scheduled'
-
 
 # ================= SESSION STATE =================
 if "auth_mode" not in st.session_state:
@@ -860,7 +932,7 @@ elif st.session_state.auth_mode == "signup":
                     st.session_state.auth_mode = "login"
                     st.rerun()
                 else:
-                    st.error("Email already exists or there was an error creating the account ❌")
+                    st.error("Email already exists ❌")
             else:
                 st.warning("Fill all required fields")
 
@@ -907,7 +979,6 @@ elif st.session_state.user and st.session_state.page == "home":
     today_medicines = get_medicines_for_date(user_id, today_str)
     settings = get_settings(user_id)
     
-    # Header card
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
         st.markdown(f"# Hi {user[1]}! 👋")
@@ -924,7 +995,6 @@ elif st.session_state.user and st.session_state.page == "home":
     
     st.markdown("---")
     
-    # Get mascot state
     def get_mascot_state():
         current_hour = current_time.hour
         is_evening = current_hour >= 20
@@ -948,7 +1018,6 @@ elif st.session_state.user and st.session_state.page == "home":
                 elif status == 'upcoming':
                     upcoming_count += 1
         
-        # Evening time
         if is_evening:
             if taken_count == total_scheduled and total_scheduled > 0:
                 return {
@@ -959,11 +1028,10 @@ elif st.session_state.user and st.session_state.page == "home":
             else:
                 return {
                     'emotion': 'sleepy',
-                    'message': f"Time for bed! You missed {missed_count} medicine{'s' if missed_count != 1 else ''} today. Let's do better tomorrow! Good night! 💤",
+                    'message': f"Time for bed! You missed {missed_count} medicine{'s' if missed_count != 1 else ''} today. Let's do better tomorrow! Good night! 😴",
                     'missed_list': missed_medicines if missed_medicines else None
                 }
         
-        # Daytime
         if missed_count > 0:
             return {
                 'emotion': 'sad',
@@ -989,21 +1057,19 @@ elif st.session_state.user and st.session_state.page == "home":
     
     mascot_state = get_mascot_state()
     
-    # Show mascot if there are medicines
     if mascot_state and today_medicines:
-        render_pill_mascot(
+        render_emoji_mascot(
             mascot_state['emotion'],
             mascot_state['message'],
             mascot_state['missed_list']
         )
         st.markdown("---")
     
-    # Show upcoming reminders
     if settings['reminders_enabled']:
         upcoming = get_upcoming_reminders(user_id)
         if upcoming and upcoming[0]['minutes_until'] <= settings['reminder_advance_minutes']:
             st.markdown("## 🔔 Upcoming Reminders")
-            for reminder in upcoming[:3]:  # Show next 3
+            for reminder in upcoming[:3]:
                 if reminder['minutes_until'] <= settings['reminder_advance_minutes']:
                     hours = reminder['minutes_until'] // 60
                     minutes = reminder['minutes_until'] % 60
@@ -1011,14 +1077,13 @@ elif st.session_state.user and st.session_state.page == "home":
                     
                     st.markdown(f"""
                     <div class="medicine-card card-upcoming">
-                        <h3>⏰ {reminder['medicine']['name']}</h3>
+                        <h3>🔔 {reminder['medicine']['name']}</h3>
                         <p>💊 {reminder['medicine']['dosage']} • 🕐 {reminder['time']}</p>
                         <p>📍 In {time_text}</p>
                     </div>
                     """, unsafe_allow_html=True)
             st.markdown("---")
     
-    # Today's Medicines
     st.markdown("## 📅 Today's Medicines")
     
     if not today_medicines:
@@ -1034,7 +1099,7 @@ elif st.session_state.user and st.session_state.page == "home":
                 status_colors = {
                     'taken': ('✅', 'card-taken'),
                     'missed': ('❌', 'card-missed'),
-                    'upcoming': ('⏰', 'card-upcoming'),
+                    'upcoming': ('🔔', 'card-upcoming'),
                     'scheduled': ('📋', 'card-scheduled')
                 }
                 
@@ -1057,13 +1122,12 @@ elif st.session_state.user and st.session_state.page == "home":
                 
                 with col2:
                     st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("✓ Taken" if not is_taken else "↶ Undo", 
+                    if st.button("✓ Taken" if not is_taken else "↺ Undo", 
                                key=f"toggle_{medicine['id']}_{time_slot}",
                                use_container_width=True):
                         toggle_intake(medicine['id'], today_str, time_slot)
                         st.rerun()
     
-    # Motivational message
     if stats['today_adherence'] >= 80:
         st.markdown("""
         <div style="background: linear-gradient(135deg, #fff9c4 0%, #ffcc80 100%); 
@@ -1103,7 +1167,7 @@ elif st.session_state.user and st.session_state.page == "profile":
             if name:
                 update_user(user_id, name, age, conditions, phone, email_address)
                 st.session_state.user = get_user_by_id(user_id)
-                st.success(f"✅ Profile saved! 💕")
+                st.success(f"✅ Profile saved! 💜")
                 st.balloons()
             else:
                 st.error("Please enter your name! 😊")
@@ -1204,7 +1268,6 @@ elif st.session_state.user and st.session_state.page == "medicines_list":
     st.markdown("### Manage your medications")
     st.markdown("---")
     
-    # Filter options
     col1, col2, col3 = st.columns(3)
     with col1:
         filter_type = st.selectbox("Filter by Type", ["All", "Daily (Ongoing)", "Date Range"])
@@ -1213,7 +1276,6 @@ elif st.session_state.user and st.session_state.page == "medicines_list":
     with col3:
         search = st.text_input("🔍 Search", placeholder="Search medicine name...")
     
-    # Filter medicines
     medicines = get_user_medicines(user_id)
     filtered_meds = medicines
     
@@ -1263,12 +1325,10 @@ elif st.session_state.user and st.session_state.page == "medicines_list":
                     st.markdown(f"**Color:** <span style='display:inline-block; width:30px; height:30px; background-color:{color}; border-radius:50%; vertical-align:middle;'></span>", unsafe_allow_html=True)
                 
                 with col2:
-                    # Calculate intake stats
                     cursor.execute(f"SELECT COUNT(*) FROM tracking WHERE medicine_id={med_id} AND taken=1")
                     total_intakes = cursor.fetchone()[0]
                     st.metric("Total Taken", total_intakes)
                 
-                # Action buttons
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
@@ -1290,7 +1350,6 @@ elif st.session_state.user and st.session_state.page == "medicines_list":
                         st.success(f"Deleted {name}")
                         st.rerun()
     
-    # Edit Medicine
     if st.session_state.edit_medicine_id:
         med = get_medicine_by_id(st.session_state.edit_medicine_id)
         
@@ -1387,7 +1446,6 @@ elif st.session_state.user and st.session_state.page == "calendar":
     st.markdown("### View your medicine intake history")
     st.markdown("---")
     
-    # Month/Year Navigation
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col1:
@@ -1417,25 +1475,22 @@ elif st.session_state.user and st.session_state.page == "calendar":
 
     st.markdown("---")
 
-    # Legend
     st.markdown("""
     <div style="text-align:center; padding: 10px;">
     <span style="background:#d4edda;padding:5px 10px;border-radius:5px;border:2px solid #28a745;">🟩 100%</span>
-    <span style="background:#e8f5e9;padding:5px 10px;border-radius:5px;border:2px solid #66bb6a;">🟢 80-99%</span>
-    <span style="background:#fff3cd;padding:5px 10px;border-radius:5px;border:2px solid #ffc107;">🟡 60-79%</span>
-    <span style="background:#f8d7da;padding:5px 10px;border-radius:5px;border:2px solid #dc3545;">🔴 &lt;60%</span>
+    <span style="background:#e8f5e9;padding:5px 10px;border-radius:5px;border:2px solid #66bb6a;">🟨 80-99%</span>
+    <span style="background:#fff3cd;padding:5px 10px;border-radius:5px;border:2px solid #ffc107;">🟧 60-79%</span>
+    <span style="background:#f8d7da;padding:5px 10px;border-radius:5px;border:2px solid #dc3545;">🟥 &lt;60%</span>
     <span style="background:#e9ecef;padding:5px 10px;border-radius:5px;border:2px solid #ced4da;">⬜ Future/No Meds</span>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("---")
 
-    # Week headers
     week_cols = st.columns(7)
     for i, day in enumerate(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]):
         week_cols[i].markdown(f"<p style='text-align:center;color:#b144ff;font-weight:bold;font-size:1.1rem;'>{day}</p>", unsafe_allow_html=True)
 
-    # Calendar grid
     cal = calendar.monthcalendar(year, month)
 
     for week in cal:
@@ -1447,7 +1502,6 @@ elif st.session_state.user and st.session_state.page == "calendar":
                 target_date = f"{year:04d}-{month:02d}-{day_num:02d}"
                 adherence = calculate_adherence(user_id, target_date)
                 
-                # Determine color based on adherence
                 if adherence >= 100:
                     color_bg = "#d4edda"
                     color_border = "#28a745"
@@ -1474,14 +1528,11 @@ elif st.session_state.user and st.session_state.page == "calendar":
                 today_border = "4px solid #b144ff" if is_today else "2px solid #e9ecef"
                 today_class = "today" if is_today else ""
                 
-                # Get medicines for this day
                 day_meds = get_medicines_for_date(user_id, target_date)
                 
-                # Check if it's a future date
                 date_obj = date(year, month, day_num)
                 is_future = date_obj > today_date
                 
-                # Adjust for future dates or no medicines
                 if is_future or not day_meds:
                     color_bg = "#f8f9fa"
                     color_border = "#e9ecef"
@@ -1492,7 +1543,6 @@ elif st.session_state.user and st.session_state.page == "calendar":
                     adherence_text = f"{adherence}%"
                     adherence_value = adherence
                 
-                # Build medicine list HTML
                 med_list_html = ""
                 if day_meds:
                     med_list_html = "<div class='medicine-list'>"
@@ -1500,7 +1550,6 @@ elif st.session_state.user and st.session_state.page == "calendar":
                         med_list_html += f"<div class='medicine-item'>💊 {med['name']}</div>"
                     med_list_html += "</div>"
                 
-                # Dose count
                 total_doses = sum(len(med['times']) for med in day_meds) if day_meds else 0
                 
                 cols[i].markdown(
@@ -1519,13 +1568,11 @@ elif st.session_state.user and st.session_state.page == "calendar":
                     unsafe_allow_html=True
                 )
                 
-                # Add button to view day details
                 if not is_future and day_meds:
                     if cols[i].button("📋 Details", key=f"view_{target_date}", use_container_width=True):
                         st.session_state.selected_date = target_date
                         st.session_state.view_day_details = True
 
-    # Quick Navigation Buttons
     st.markdown("---")
     col1, col2, col3 = st.columns(3)
     
@@ -1554,7 +1601,6 @@ elif st.session_state.user and st.session_state.page == "calendar":
                 st.session_state.cal_month += 1
             st.rerun()
 
-    # Day Details View (if clicked)
     if st.session_state.get('view_day_details', False):
         st.markdown("---")
         st.markdown(f"## 📋 Details for {st.session_state.selected_date}")
@@ -1570,7 +1616,6 @@ elif st.session_state.user and st.session_state.page == "calendar":
                 for time_slot in med['times']:
                     total += 1
                     
-                    # Check if taken
                     cursor.execute(
                         "SELECT taken, timestamp FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
                         (med['id'], selected_date, time_slot)
@@ -1581,7 +1626,6 @@ elif st.session_state.user and st.session_state.page == "calendar":
                     if is_taken:
                         taken += 1
                     
-                    # Get taken time
                     taken_at = None
                     if result and result[1]:
                         taken_at = datetime.fromisoformat(result[1]).strftime('%I:%M %p')
@@ -1599,7 +1643,6 @@ elif st.session_state.user and st.session_state.page == "calendar":
                     </div>
                     """, unsafe_allow_html=True)
             
-            # Summary
             adherence_rate = int((taken / total * 100)) if total > 0 else 0
             st.markdown("---")
             
@@ -1619,37 +1662,26 @@ elif st.session_state.user and st.session_state.page == "calendar":
             st.session_state.view_day_details = False
             st.rerun()
 
-    # Weekly overview
     st.markdown("---")
     st.markdown("## 📊 Weekly Adherence Overview")
     
     weekly_data = calculate_weekly_adherence(user_id)
     
-    # Create bar chart
-    weekly_values = list(weekly_data.values())
-    marker_colors = ['#81c784' if v >= 80 else '#ffd54f' if v >= 50 else '#e57373' for v in weekly_values]
-    
-    fig = go.Figure(data=[
-        go.Bar(
-            x=list(weekly_data.keys()),
-            y=weekly_values,
-            marker_color=marker_colors,
-            text=weekly_values,
-            texttemplate='%{text}%',
-            textposition='outside'
-        )
-    ])
-    
-    fig.update_layout(
-        title="Last 7 Days Adherence",
-        xaxis_title="Day",
-        yaxis_title="Adherence %",
-        yaxis_range=[0, 105],
-        height=400,
-        showlegend=False
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
+    weekly_html = """
+    <div style="display: flex; justify-content: space-around; align-items: flex-end; height: 200px; padding: 20px; background: white; border-radius: 15px;">
+    """
+    for day, rate in weekly_data.items():
+        bar_color = "#81c784" if rate >= 80 else "#ffd54f" if rate >= 50 else "#e57373"
+        bar_height = f"{rate * 2}px"
+        weekly_html += f"""
+        <div style="text-align: center; margin: 0 10px;">
+            <div style="background: {bar_color}; width: 40px; height: {bar_height}; border-radius: 5px 5px 0 0; margin-bottom: 10px;"></div>
+            <div style="font-weight: bold;">{day}</div>
+            <div style="font-size: 0.9rem;">{rate}%</div>
+        </div>
+        """
+    weekly_html += "</div>"
+    st.markdown(weekly_html, unsafe_allow_html=True)
 
 # ================= SETTINGS PAGE =================
 elif st.session_state.user and st.session_state.page == "settings":
@@ -1659,7 +1691,6 @@ elif st.session_state.user and st.session_state.page == "settings":
     st.markdown("### Customize your Dr.Pill experience")
     st.markdown("---")
     
-    # Reminder Settings
     st.markdown("## 🔔 Reminder Settings")
     
     settings = get_settings(user_id)
@@ -1688,10 +1719,94 @@ elif st.session_state.user and st.session_state.page == "settings":
     
     st.markdown("---")
     
-    # Statistics
-    st.markdown("## 📊 Your Statistics")
-    
+    st.markdown("## 📊 Weekly Adherence Overview")
     stats = get_adherence_stats(user_id)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Weekly Average", f"{stats['weekly_avg']}%")
+    with col2:
+        st.metric("Best Day", f"{stats['weekly_best']}%")
+    with col3:
+        st.metric("Worst Day", f"{stats['weekly_worst']}%")
+    with col4:
+        improvement = stats['weekly_avg'] - stats['weekly_worst']
+        st.metric("Improvement Needed", f"{improvement}%" if improvement > 0 else "Perfect!")
+    
+    weekly_data = stats['weekly_data']
+    weekly_html = """
+    <div style="display: flex; justify-content: space-around; align-items: flex-end; height: 200px; padding: 20px; background: white; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    """
+    for day, rate in weekly_data.items():
+        bar_color = "#81c784" if rate >= 80 else "#ffd54f" if rate >= 50 else "#e57373"
+        bar_height = f"{rate * 2}px"
+        weekly_html += f"""
+        <div style="text-align: center; margin: 0 10px;">
+            <div style="background: {bar_color}; width: 40px; height: {bar_height}; border-radius: 5px 5px 0 0; margin-bottom: 10px; transition: all 0.3s;"></div>
+            <div style="font-weight: bold; color: #9c27b0;">{day}</div>
+            <div style="font-size: 0.9rem; color: #666;">{rate}%</div>
+        </div>
+        """
+    weekly_html += "</div>"
+    st.markdown(weekly_html, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    st.markdown("## 📅 Monthly Adherence Overview")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Monthly Average", f"{stats['monthly_avg']}%")
+    with col2:
+        st.metric("Best Day", f"{stats['monthly_best']}%")
+    with col3:
+        st.metric("Worst Day", f"{stats['monthly_worst']}%")
+    with col4:
+        days_tracked = len(stats['monthly_data'])
+        st.metric("Days Tracked", days_tracked)
+    
+    st.markdown("### Monthly Progress")
+    st.progress(stats['monthly_avg'] / 100)
+    st.markdown(f"**{stats['monthly_avg']}% average adherence this month**")
+    
+    if stats['monthly_data']:
+        st.markdown("### Daily Trends This Month")
+        monthly_dates = list(stats['monthly_data'].keys())[-14:]
+        monthly_values = [stats['monthly_data'][d] for d in monthly_dates]
+        
+        monthly_html = """
+        <div style="display: flex; overflow-x: auto; padding: 10px; background: white; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        """
+        for date_str, rate in zip(monthly_dates, monthly_values):
+            day_short = datetime.strptime(date_str, '%Y-%m-%d').strftime('%m/%d')
+            bar_color = "#81c784" if rate >= 80 else "#ffd54f" if rate >= 50 else "#e57373"
+            bar_height = f"{rate * 1.5}px"
+            monthly_html += f"""
+            <div style="text-align: center; margin: 0 8px; min-width: 50px;">
+                <div style="background: {bar_color}; width: 30px; height: {bar_height}; border-radius: 5px 5px 0 0; margin-bottom: 5px; min-height: 20px;"></div>
+                <div style="font-size: 0.7rem; color: #666;">{day_short}</div>
+                <div style="font-size: 0.8rem; font-weight: bold; color: #9c27b0;">{rate}%</div>
+            </div>
+            """
+        monthly_html += "</div>"
+        st.markdown(monthly_html, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    st.markdown("## 💡 Personalized Health Tips")
+    
+    tips = get_health_tips(stats)
+    
+    for i, tip in enumerate(tips, 1):
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #fff9c4 0%, #ffecb3 100%); border-radius: 15px; padding: 1rem; margin: 0.5rem 0; border-left: 4px solid #ffc107; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <p style="margin: 0; font-size: 1.1rem; color: #333;"><strong>Tip {i}:</strong> {tip}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    st.markdown("## 📊 Your Statistics")
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -1713,9 +1828,8 @@ elif st.session_state.user and st.session_state.page == "settings":
     with col4:
         st.metric("Active Medicines", stats['active_medicines'])
     
-    # Overall adherence
     st.markdown("---")
-    st.markdown("### 🎯 30-Day Adherence Rate")
+    st.markdown("### 🏆 30-Day Adherence Rate")
     
     col1, col2 = st.columns([1, 3])
     with col1:
@@ -1733,23 +1847,25 @@ elif st.session_state.user and st.session_state.page == "settings":
     
     st.markdown("---")
     
-    # Data Management
     st.markdown("## 💾 Data Management")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### Export Data")
-        if st.button("📥 Download Backup (JSON)", use_container_width=True):
-            json_data = export_user_data(user_id)
-            st.download_button(
-                label="💾 Download",
-                data=json_data,
-                file_name=f"dr_pill_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
-            st.success("✅ Backup ready for download!")
+        st.markdown("### 📄 Download Report (Text)")
+        if st.button("Generate Text Report", use_container_width=True):
+            with st.spinner("Generating your text report..."):
+                report_data = generate_text_report(user_id)
+                
+                st.download_button(
+                    label="📥 Download Report",
+                    data=report_data,
+                    file_name=f"DrPill_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+                
+                st.success("✅ Text report generated successfully!")
     
     with col2:
         st.markdown("### Danger Zone")
@@ -1787,7 +1903,6 @@ elif st.session_state.user and st.session_state.page == "shop":
     st.markdown("### Order your medicines online")
     st.markdown("---")
     
-    # Important Note
     st.markdown("""
     <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem;">
         <p style="font-size: 1.2rem; margin: 0; color: #856404; font-weight: bold;">
@@ -1801,7 +1916,6 @@ elif st.session_state.user and st.session_state.page == "shop":
     
     st.markdown("---")
     
-    # Cart summary in header
     cart_count = len(st.session_state.cart)
     cart_total = sum(item['price'] * item['quantity'] for item in st.session_state.cart)
     
@@ -1813,13 +1927,11 @@ elif st.session_state.user and st.session_state.page == "shop":
     with col3:
         st.metric("Cart Total", f"${cart_total:.2f}")
     
-    # Category filter
     categories = ["All", "Pain Relief", "Vitamins", "Supplements", "Digestive", "Minerals", "Sleep", "Joint Care", "Heart Health"]
     selected_category = st.selectbox("Filter by Category", categories)
     
     st.markdown("---")
     
-    # Shop items
     shop_items = [
         {"id": "1", "name": "Aspirin 100mg", "price": 5.99, "description": "Pain relief and fever reduction", "emoji": "💊", "category": "Pain Relief"},
         {"id": "2", "name": "Vitamin D3", "price": 12.99, "description": "Supports bone health", "emoji": "☀️", "category": "Vitamins"},
@@ -1835,11 +1947,9 @@ elif st.session_state.user and st.session_state.page == "shop":
         {"id": "12", "name": "CoQ10 200mg", "price": 24.99, "description": "Heart health antioxidant", "emoji": "❤️", "category": "Heart Health"},
     ]
     
-    # Filter by category
     if selected_category != "All":
         shop_items = [item for item in shop_items if item["category"] == selected_category]
     
-    # Display items in grid
     cols_per_row = 3
     for i in range(0, len(shop_items), cols_per_row):
         cols = st.columns(cols_per_row)
@@ -1866,7 +1976,6 @@ elif st.session_state.user and st.session_state.page == "shop":
                     )
                     
                     if st.button(f"🛒 Add to Cart", key=f"add_{item['id']}", use_container_width=True):
-                        # Check if item already in cart
                         existing_item = next((x for x in st.session_state.cart if x['id'] == item['id']), None)
                         if existing_item:
                             existing_item['quantity'] += quantity
@@ -1881,7 +1990,6 @@ elif st.session_state.user and st.session_state.page == "shop":
                         st.success(f"Added {quantity}x {item['name']} to cart!")
                         st.rerun()
     
-    # Shopping Cart
     if st.session_state.cart:
         st.markdown("---")
         st.markdown("## 🛒 Your Shopping Cart")
@@ -1893,98 +2001,69 @@ elif st.session_state.user and st.session_state.page == "shop":
                 st.markdown(f"<div style='font-size: 3rem; text-align: center;'>{item['emoji']}</div>", unsafe_allow_html=True)
             
             with col2:
-                st.markdown(f"**{item['name']}**")
-                st.markdown(f"${item['price']} each")
+                st.markdown(f"### {item['name']}")
+                st.markdown(f"**Price:** ${item['price']:.2f}")
             
             with col3:
-                st.markdown(f"Quantity: {item['quantity']}")
-                st.markdown(f"**Subtotal: ${item['price'] * item['quantity']:.2f}**")
+                new_qty = st.number_input("Quantity", min_value=1, max_value=10, value=item['quantity'], key=f"cart_qty_{item['id']}")
+                if new_qty != item['quantity']:
+                    item['quantity'] = new_qty
+                    st.rerun()
             
             with col4:
-                if st.button("🗑️", key=f"remove_{item['id']}", use_container_width=True):
+                item_total = item['price'] * item['quantity']
+                st.markdown(f"### ${item_total:.2f}")
+                if st.button("❌", key=f"remove_{item['id']}", help="Remove from cart"):
                     st.session_state.cart.remove(item)
                     st.rerun()
         
-        # Checkout
         st.markdown("---")
-        col1, col2, col3 = st.columns([2, 1, 1])
+        cart_total = sum(item['price'] * item['quantity'] for item in st.session_state.cart)
+        st.markdown(f"### **Total: ${cart_total:.2f}**")
         
-        with col2:
-            st.markdown(f"### Total: ${cart_total:.2f}")
-        
-        with col3:
-            if st.button("💳 Checkout", use_container_width=True, type="primary"):
-                order_id = f"ORD_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                new_order = {
-                    'id': order_id,
-                    'items': st.session_state.cart.copy(),
-                    'total': cart_total,
-                    'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'status': "Processing"
-                }
-                st.session_state.orders.append(new_order)
-                st.session_state.cart = []
-                st.success(f"✅ Order placed! Order ID: {order_id}")
-                st.balloons()
-                st.rerun()
-    
-    # Order History
-    if st.session_state.orders:
-        st.markdown("---")
-        st.markdown("## 📦 Order History")
-        
-        for order in reversed(st.session_state.orders):
-            with st.expander(f"Order {order['id']} - ${order['total']:.2f} - {order['status']}"):
-                st.markdown(f"**Date:** {order['date']}")
-                st.markdown(f"**Status:** {order['status']}")
-                st.markdown("**Items:**")
-                for item in order['items']:
-                    st.markdown(f"- {item['emoji']} {item['name']} x{item['quantity']} = ${item['price'] * item['quantity']:.2f}")
-                st.markdown(f"**Total: ${order['total']:.2f}**")
-
-# ================= NAVIGATION =================
-if st.session_state.user:
-    st.sidebar.markdown("# 💊 Dr.Pill")
-    st.sidebar.markdown("---")
-    
-    # Show notification badge if there are upcoming reminders
-    settings = get_settings(st.session_state.user[0])
-    upcoming = get_upcoming_reminders(st.session_state.user[0])
-    urgent_count = len([r for r in upcoming if r['minutes_until'] <= settings['reminder_advance_minutes']])
-    
-    pages = {
-        '🏠 Home': 'home',
-        '👤 Profile': 'profile',
-        '➕ Add Medicine': 'add_medicine',
-        '💊 All Medicines': 'medicines_list',
-        '📅 Calendar': 'calendar',
-        '⚙️ Settings': 'settings',
-        '🛒 Shop': 'shop'
-    }
-    
-    for label, page in pages.items():
-        # Add notification badge to Home button
-        display_label = label
-        if page == 'home' and urgent_count > 0 and settings['reminders_enabled']:
-            display_label = f"{label} 🔴"
-        
-        if st.sidebar.button(display_label, use_container_width=True, 
-                            type="primary" if st.session_state.page == page else "secondary"):
-            st.session_state.page = page
+        if st.button("💳 Checkout (Demo)", use_container_width=True):
+            st.session_state.orders.append({
+                'items': st.session_state.cart.copy(),
+                'total': cart_total,
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            })
+            st.session_state.cart = []
+            st.success("🎉 Order placed successfully! (Demo)")
             st.rerun()
+
+# ================= SIDEBAR NAVIGATION =================
+with st.sidebar:
+    st.markdown("# 🧭 Navigation")
+    st.markdown("---")
     
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("💕 Taking care of you, one reminder at a time!")
-    
-    # Show quick stats in sidebar
-    stats = get_adherence_stats(st.session_state.user[0])
-    st.sidebar.markdown("### 📊 Quick Stats")
-    st.sidebar.progress(stats['today_adherence'] / 100)
-    st.sidebar.markdown(f"Today's Adherence: **{stats['today_adherence']}%**")
-    st.sidebar.markdown(f"Active Medicines: **{stats['active_medicines']}/{stats['total_medicines']}**")
-    
-    if st.sidebar.button("🚪 Log Out", use_container_width=True):
-        st.session_state.user = None
-        st.session_state.auth_mode = None
-        st.session_state.page = "home"
-        st.rerun()
+    if st.session_state.user:
+        if st.button("🏠 Home", use_container_width=True):
+            st.session_state.page = "home"
+            st.rerun()
+        
+        if st.button("📅 Calendar", use_container_width=True):
+            st.session_state.page = "calendar"
+            st.rerun()
+        
+        if st.button("💊 Medicines", use_container_width=True):
+            st.session_state.page = "medicines_list"
+            st.rerun()
+        
+        if st.button("👤 Profile", use_container_width=True):
+            st.session_state.page = "profile"
+            st.rerun()
+        
+        if st.button("⚙️ Settings", use_container_width=True):
+            st.session_state.page = "settings"
+            st.rerun()
+        
+        if st.button("🛒 Shop", use_container_width=True):
+            st.session_state.page = "shop"
+            st.rerun()
+        
+        st.markdown("---")
+        
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state.user = None
+            st.session_state.page = "home"
+            st.rerun()
