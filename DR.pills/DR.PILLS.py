@@ -345,13 +345,26 @@ cursor = conn.cursor()
 # ================= DB FUNCTIONS =================
 def create_user(name, email, password, age, conditions="", phone="", email_address=""):
     try:
+        # Check if email already exists
+        cursor.execute("SELECT id FROM users WHERE email=?", (email,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            print(f"Email {email} already exists in database")
+            return False
+        
+        # Insert new user
         cursor.execute(
             "INSERT INTO users (name, email, password, age, conditions, phone, email_address) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (name, email, password, age, conditions, phone, email_address)
         )
         conn.commit()
         return True
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError as e:
+        print(f"IntegrityError: {e}")
+        return False
+    except Exception as e:
+        print(f"Error creating user: {e}")
         return False
 
 def login_user(email, password):
@@ -847,7 +860,7 @@ elif st.session_state.auth_mode == "signup":
                     st.session_state.auth_mode = "login"
                     st.rerun()
                 else:
-                    st.error("Email already exists ❌")
+                    st.error("Email already exists or there was an error creating the account ❌")
             else:
                 st.warning("Fill all required fields")
 
