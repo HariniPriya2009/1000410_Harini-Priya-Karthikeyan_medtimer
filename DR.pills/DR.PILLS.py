@@ -4,13 +4,9 @@ import pandas as pd
 from datetime import date, datetime, timedelta, time
 import calendar
 import json
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-from io import BytesIO
+import plotly.graph_objects as go
+from typing import List, Dict, Optional
+import os
 
 # ================= PAGE CONFIG =================
 st.set_page_config(
@@ -120,28 +116,23 @@ st.markdown("""
         margin: 2rem 0;
     }
     
-    /* Emoji Mascot Styles */
-    .emoji-mascot {
-        font-size: 10rem;
-        display: inline-block;
+    .mascot {
+        font-size: 8rem;
         animation: bounce 2s infinite;
     }
     
-    .emoji-mascot-sad {
-        font-size: 10rem;
-        display: inline-block;
+    .mascot-sad {
+        font-size: 8rem;
         animation: sway 2s infinite;
     }
     
-    .emoji-mascot-urgent {
-        font-size: 10rem;
-        display: inline-block;
+    .mascot-urgent {
+        font-size: 8rem;
         animation: shake 0.5s infinite;
     }
     
-    .emoji-mascot-sleepy {
-        font-size: 10rem;
-        display: inline-block;
+    .mascot-sleepy {
+        font-size: 8rem;
         animation: rotate 3s infinite;
     }
     
@@ -284,99 +275,86 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ================= DATABASE ====================
+@st.cache_resource
 def init_db():
-    """Initialize database and create tables - FIXED VERSION"""
-    try:
-        conn = sqlite3.connect("drpill.db", check_same_thread=False)
-        cursor = conn.cursor()
-        
-        # Create users table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            email TEXT UNIQUE,
-            password TEXT,
-            age INTEGER,
-            conditions TEXT,
-            phone TEXT,
-            email_address TEXT
-        )
-        """)
-        
-        # Create medicines table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS medicines (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            name TEXT,
-            dosage TEXT,
-            med_type TEXT,
-            times TEXT,
-            time_labels TEXT,
-            notes TEXT,
-            start_date TEXT,
-            end_date TEXT,
-            paused BOOLEAN DEFAULT 0,
-            color TEXT DEFAULT '#9c27b0',
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-        """)
-        
-        # Create tracking table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tracking (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            medicine_id INTEGER,
-            date TEXT,
-            time_slot TEXT,
-            taken BOOLEAN DEFAULT 0,
-            timestamp DATETIME,
-            FOREIGN KEY (medicine_id) REFERENCES medicines(id)
-        )
-        """)
-        
-        # Create settings table
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS settings (
-            user_id INTEGER PRIMARY KEY,
-            reminders_enabled BOOLEAN DEFAULT 1,
-            reminder_advance_minutes INTEGER DEFAULT 30,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-        """)
-        
-        conn.commit()
-        print("✅ Database initialized successfully")
-        return conn
-    except Exception as e:
-        print(f"❌ Error initializing database: {e}")
-        raise
+    conn = sqlite3.connect("drpill.db", check_same_thread=False)
+    cursor = conn.cursor()
+    
+    # Create users table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        email TEXT UNIQUE,
+        password TEXT,
+        age INTEGER,
+        conditions TEXT,
+        phone TEXT,
+        email_address TEXT
+    )
+    """)
+    
+    # Create medicines table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS medicines (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        name TEXT,
+        dosage TEXT,
+        med_type TEXT,
+        times TEXT,
+        time_labels TEXT,
+        notes TEXT,
+        start_date TEXT,
+        end_date TEXT,
+        paused BOOLEAN DEFAULT 0,
+        color TEXT DEFAULT '#9c27b0',
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+    """)
+    
+    # Create tracking table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tracking (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        medicine_id INTEGER,
+        date TEXT,
+        time_slot TEXT,
+        taken BOOLEAN DEFAULT 0,
+        timestamp DATETIME,
+        FOREIGN KEY (medicine_id) REFERENCES medicines(id)
+    )
+    """)
+    
+    # Create settings table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS settings (
+        user_id INTEGER PRIMARY KEY,
+        reminders_enabled BOOLEAN DEFAULT 1,
+        reminder_advance_minutes INTEGER DEFAULT 30,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+    """)
+    
+    conn.commit()
+    return conn
 
-# Initialize database (without cache decorator to ensure tables are created)
 conn = init_db()
 cursor = conn.cursor()
 
 # ================= DB FUNCTIONS =================
 def create_user(name, email, password, age, conditions="", phone="", email_address=""):
-    """Create a new user - FIXED VERSION"""
     try:
         cursor.execute(
             "INSERT INTO users (name, email, password, age, conditions, phone, email_address) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (name, email, password, age, conditions, phone, email_address)
         )
         conn.commit()
-        print(f"✅ User created: {email}")
         return True
-    except sqlite3.IntegrityError as e:
-        print(f"❌ IntegrityError creating user: {e}")
-        return False
-    except Exception as e:
-        print(f"❌ Error creating user: {e}")
+    except sqlite3.IntegrityError:
         return False
 
 def login_user(email, password):
-    """Login user"""
     cursor.execute(
         "SELECT * FROM users WHERE email=? AND password=?",
         (email, password)
@@ -384,26 +362,17 @@ def login_user(email, password):
     return cursor.fetchone()
 
 def get_user_by_id(user_id):
-    """Get user by ID"""
     cursor.execute("SELECT * FROM users WHERE id=?", (user_id,))
     return cursor.fetchone()
 
 def update_user(user_id, name, age, conditions, phone, email_address):
-    """Update user information"""
-    try:
-        cursor.execute(
-            "UPDATE users SET name=?, age=?, conditions=?, phone=?, email_address=? WHERE id=?",
-            (name, age, conditions, phone, email_address, user_id)
-        )
-        conn.commit()
-        print(f"✅ User updated: ID {user_id}")
-        return True
-    except Exception as e:
-        print(f"❌ Error updating user: {e}")
-        return False
+    cursor.execute(
+        "UPDATE users SET name=?, age=?, conditions=?, phone=?, email_address=? WHERE id=?",
+        (name, age, conditions, phone, email_address, user_id)
+    )
+    conn.commit()
 
 def save_medicine(user_id, name, dosage, med_type, times, time_labels, notes, start_date, end_date, color):
-    """Save medicine"""
     cursor.execute(
         "INSERT INTO medicines (user_id, name, dosage, med_type, times, time_labels, notes, start_date, end_date, color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (user_id, name, dosage, med_type, times, time_labels, notes, start_date, end_date, color)
@@ -412,17 +381,14 @@ def save_medicine(user_id, name, dosage, med_type, times, time_labels, notes, st
     return cursor.lastrowid
 
 def get_user_medicines(user_id):
-    """Get all medicines for a user"""
     cursor.execute("SELECT * FROM medicines WHERE user_id=?", (user_id,))
     return cursor.fetchall()
 
 def get_medicine_by_id(med_id):
-    """Get medicine by ID"""
     cursor.execute("SELECT * FROM medicines WHERE id=?", (med_id,))
     return cursor.fetchone()
 
 def update_medicine(med_id, name, dosage, med_type, times, time_labels, notes, start_date, end_date, color):
-    """Update medicine"""
     cursor.execute(
         "UPDATE medicines SET name=?, dosage=?, med_type=?, times=?, time_labels=?, notes=?, start_date=?, end_date=?, color=? WHERE id=?",
         (name, dosage, med_type, times, time_labels, notes, start_date, end_date, color, med_id)
@@ -430,18 +396,15 @@ def update_medicine(med_id, name, dosage, med_type, times, time_labels, notes, s
     conn.commit()
 
 def delete_medicine(med_id):
-    """Delete medicine"""
     cursor.execute("DELETE FROM medicines WHERE id=?", (med_id,))
     cursor.execute("DELETE FROM tracking WHERE medicine_id=?", (med_id,))
     conn.commit()
 
 def toggle_medicine_pause(med_id):
-    """Toggle medicine pause status"""
     cursor.execute("UPDATE medicines SET paused = NOT paused WHERE id=?", (med_id,))
     conn.commit()
 
 def get_medicines_for_date(user_id, target_date):
-    """Get medicines scheduled for a specific date"""
     cursor.execute("SELECT * FROM medicines WHERE user_id=?", (user_id,))
     medicines = cursor.fetchall()
     scheduled_meds = []
@@ -470,7 +433,6 @@ def get_medicines_for_date(user_id, target_date):
     return scheduled_meds
 
 def mark_as_taken(medicine_id, target_date, time_slot):
-    """Mark medicine as taken"""
     cursor.execute(
         "SELECT id FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
         (medicine_id, target_date, time_slot)
@@ -490,7 +452,6 @@ def mark_as_taken(medicine_id, target_date, time_slot):
     conn.commit()
 
 def toggle_intake(medicine_id, target_date, time_slot):
-    """Toggle medicine intake status"""
     cursor.execute(
         "SELECT id, taken FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
         (medicine_id, target_date, time_slot)
@@ -511,7 +472,6 @@ def toggle_intake(medicine_id, target_date, time_slot):
     conn.commit()
 
 def get_intake_status(medicine_id, target_date, time_slot):
-    """Get intake status for a medicine"""
     cursor.execute(
         "SELECT taken FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
         (medicine_id, target_date, time_slot)
@@ -520,7 +480,6 @@ def get_intake_status(medicine_id, target_date, time_slot):
     return result[0] if result else False
 
 def calculate_adherence(user_id, target_date):
-    """Calculate adherence percentage for a specific date"""
     scheduled_meds = get_medicines_for_date(user_id, target_date)
     if not scheduled_meds:
         return 100
@@ -545,7 +504,6 @@ def calculate_adherence(user_id, target_date):
     return int((taken_slots / total_slots) * 100)
 
 def calculate_weekly_adherence(user_id):
-    """Calculate weekly adherence data"""
     weekly_data = {}
     for i in range(7):
         d = date.today()
@@ -556,30 +514,7 @@ def calculate_weekly_adherence(user_id):
     
     return weekly_data
 
-def calculate_monthly_adherence(user_id):
-    """Calculate monthly adherence data for the current month"""
-    monthly_data = {}
-    today = date.today()
-    
-    # Get first day of current month
-    first_day = today.replace(day=1)
-    
-    # Get all days in current month
-    days_in_month = (today.replace(day=28) + timedelta(days=4)).day
-    
-    for day in range(1, days_in_month + 1):
-        target_date = today.replace(day=day).strftime('%Y-%m-%d')
-        
-        # Only include past dates or today
-        check_date = today.replace(day=day)
-        if check_date <= today:
-            adherence = calculate_adherence(user_id, target_date)
-            monthly_data[target_date] = adherence
-    
-    return monthly_data
-
 def get_adherence_stats(user_id):
-    """Get comprehensive adherence statistics"""
     today = date.today().strftime("%Y-%m-%d")
     today_adherence = calculate_adherence(user_id, today)
     medicines = get_user_medicines(user_id)
@@ -595,18 +530,6 @@ def get_adherence_stats(user_id):
         last_7_days.append(adherence)
     
     avg_adherence = sum(last_7_days) / len(last_7_days) if last_7_days else 100
-    
-    # Get weekly statistics
-    weekly_data = calculate_weekly_adherence(user_id)
-    weekly_avg = sum(weekly_data.values()) / len(weekly_data) if weekly_data else 100
-    weekly_best = max(weekly_data.values()) if weekly_data else 100
-    weekly_worst = min(weekly_data.values()) if weekly_data else 100
-    
-    # Get monthly statistics
-    monthly_data = calculate_monthly_adherence(user_id)
-    monthly_avg = sum(monthly_data.values()) / len(monthly_data) if monthly_data else 100
-    monthly_best = max(monthly_data.values()) if monthly_data else 100
-    monthly_worst = min(monthly_data.values()) if monthly_data else 100
     
     # Get 30-day adherence
     total_scheduled_30d = 0
@@ -633,19 +556,10 @@ def get_adherence_stats(user_id):
         'active_medicines': active_meds,
         'avg_adherence': int(avg_adherence),
         'last_7_days': last_7_days,
-        'overall_adherence': overall_adherence,
-        'weekly_data': weekly_data,
-        'weekly_avg': int(weekly_avg),
-        'weekly_best': int(weekly_best),
-        'weekly_worst': int(weekly_worst),
-        'monthly_data': monthly_data,
-        'monthly_avg': int(monthly_avg),
-        'monthly_best': int(monthly_best),
-        'monthly_worst': int(monthly_worst)
+        'overall_adherence': overall_adherence
     }
 
 def get_settings(user_id):
-    """Get user settings"""
     cursor.execute("SELECT * FROM settings WHERE user_id=?", (user_id,))
     result = cursor.fetchone()
     if result:
@@ -663,7 +577,6 @@ def get_settings(user_id):
         return {'reminders_enabled': True, 'reminder_advance_minutes': 30}
 
 def update_settings(user_id, reminders_enabled, reminder_advance_minutes):
-    """Update user settings"""
     cursor.execute(
         "UPDATE settings SET reminders_enabled=?, reminder_advance_minutes=? WHERE user_id=?",
         (reminders_enabled, reminder_advance_minutes, user_id)
@@ -671,7 +584,6 @@ def update_settings(user_id, reminders_enabled, reminder_advance_minutes):
     conn.commit()
 
 def get_upcoming_reminders(user_id):
-    """Get upcoming medicine reminders"""
     current_time = datetime.now()
     today = current_time.strftime('%Y-%m-%d')
     today_medicines = get_medicines_for_date(user_id, today)
@@ -702,348 +614,142 @@ def get_upcoming_reminders(user_id):
     
     return sorted(upcoming, key=lambda x: x['minutes_until'])
 
-def get_health_tips(adherence_stats):
-    """Get personalized health tips based on adherence patterns"""
-    tips = []
-    
-    # Base tips library
-    general_tips = [
-        "💊 Always take your medicine at the same time each day to build a habit",
-        "⏰ Set multiple alarms or reminders for different medications",
-        "📱 Use a pill organizer to sort your weekly medications in advance",
-        "🥚 Take some medicines with food to reduce stomach upset",
-        "💧 Drink plenty of water when swallowing pills",
-        "📝 Keep a medication journal to track side effects or improvements",
-        "👨‍⚕️ Regularly review your medications with your doctor",
-        "🏃‍♂️ A healthy lifestyle complements your medication routine",
-        "😴 Good sleep helps your body heal and medications work better",
-        "🧘‍♀️ Stress management can improve treatment outcomes",
-        "🍎 A balanced diet supports overall health and medication effectiveness",
-        "🚶‍♂️ Regular exercise can boost your immune system",
-        "📅 Never skip doses without consulting your doctor",
-        "🔄 If you miss a dose, ask your doctor what to do",
-        "🧬 Understand why you're taking each medication",
-        "👥 Inform family members about your medication schedule",
-        "🌡️ Store medications properly - some need refrigeration",
-        "📋 Keep an updated list of all medications you take",
-        "✈️ Plan ahead when traveling with medications",
-        "🎯 Set realistic health goals and celebrate small wins"
-    ]
-    
-    # Add some general tips
-    tips.extend(general_tips[:5])
-    
-    # Personalized tips based on adherence
-    if adherence_stats['weekly_avg'] >= 90:
-        tips.append("🏆 Excellent adherence! You're a role model for medication management!")
-        tips.append("⭐ Consider helping others with their medication routines")
-    elif adherence_stats['weekly_avg'] >= 75:
-        tips.append("👍 Great job! You're doing well, aim for consistency")
-        tips.append("📈 Small improvements each week will lead to big results")
-    elif adherence_stats['weekly_avg'] >= 50:
-        tips.append("⚡ Focus on consistency - same time, every day")
-        tips.append("🎯 Try setting up a daily routine for your medications")
-    else:
-        tips.append("💡 Let's work on improving together - set reminders today!")
-        tips.append("🆘 Don't hesitate to ask your doctor for help with routine")
-    
-    # Best day tips
-    if adherence_stats['weekly_best'] >= 90:
-        tips.append(f"✨ Your best adherence days show your potential - replicate that success!")
-    
-    # Improvement tips
-    if adherence_stats['weekly_worst'] < adherence_stats['weekly_best'] - 20:
-        tips.append("📊 Identify what works on your best days and apply it consistently")
-    
-    # Monthly patterns
-    if adherence_stats['monthly_avg'] >= 85:
-        tips.append("🌟 Your monthly consistency is impressive - keep it up!")
-    
-    # Medication-specific tips
-    if adherence_stats['total_medicines'] > 5:
-        tips.append("📋 With multiple medications, consider a pill organizer")
-        tips.append("⏰ Stagger medication times to avoid overwhelming moments")
-    
-    return tips[:10]  # Return top 10 tips
-
-# ================= PDF REPORT GENERATION =================
-def generate_pdf_report(user_id):
-    """Generate a professional PDF report for the user"""
-    
-    # Get user data
+def export_user_data(user_id):
     user = get_user_by_id(user_id)
     medicines = get_user_medicines(user_id)
-    stats = get_adherence_stats(user_id)
     
-    # Create PDF buffer
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=18)
+    tracking_data = []
+    for med in medicines:
+        cursor.execute("SELECT * FROM tracking WHERE medicine_id=?", (med[0],))
+        tracking_data.extend(cursor.fetchall())
     
-    # Story container
-    story = []
-    
-    # Custom styles
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=28,
-        textColor=colors.HexColor('#9c27b0'),
-        alignment=TA_CENTER,
-        spaceAfter=30
-    )
-    
-    heading_style = ParagraphStyle(
-        'CustomHeading',
-        parent=styles['Heading2'],
-        fontSize=18,
-        textColor=colors.HexColor('#7b1fa2'),
-        spaceAfter=12,
-        spaceBefore=12
-    )
-    
-    normal_style = ParagraphStyle(
-        'CustomNormal',
-        parent=styles['Normal'],
-        fontSize=11,
-        spaceAfter=6
-    )
-    
-    # Title
-    title = Paragraph("Dr.Pill Medicine Tracker Report", title_style)
-    story.append(title)
-    story.append(Spacer(1, 0.2*inch))
-    
-    # Report date
-    report_date = datetime.now().strftime("%B %d, %Y at %I:%M %p")
-    date_paragraph = Paragraph(f"<b>Generated on:</b> {report_date}", normal_style)
-    story.append(date_paragraph)
-    story.append(Spacer(1, 0.3*inch))
-    
-    # User Information Section
-    user_heading = Paragraph("👤 User Information", heading_style)
-    story.append(user_heading)
-    
-    user_data = [
-        ["Name", user[1] if user else "N/A"],
-        ["Email", user[2] if user else "N/A"],
-        ["Age", f"{user[4]} years" if user else "N/A"],
-        ["Phone", user[6] if user and user[6] else "N/A"],
-        ["Health Conditions", user[5] if user and user[5] else "None reported"]
-    ]
-    
-    user_table = Table(user_data, colWidths=[2*inch, 4*inch])
-    user_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f3e5f5')),
-        ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#7b1fa2')),
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
-        ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#faf5ff')),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e1bee7')),
-    ]))
-    story.append(user_table)
-    story.append(Spacer(1, 0.4*inch))
-    
-    # Statistics Overview
-    stats_heading = Paragraph("📊 Adherence Statistics", heading_style)
-    story.append(stats_heading)
-    
-    stats_data = [
-        ["Today's Adherence", f"{stats['today_adherence']}%"],
-        ["Average Adherence (7 days)", f"{stats['avg_adherence']}%"],
-        ["Overall Adherence (30 days)", f"{stats['overall_adherence']}%"],
-        ["Total Medicines", f"{stats['total_medicines']}"],
-        ["Active Medicines", f"{stats['active_medicines']}"]
-    ]
-    
-    stats_table = Table(stats_data, colWidths=[2.5*inch, 2.5*inch])
-    stats_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#e8f5e9')),
-        ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#2e7d32')),
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
-        ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#f1f8e9')),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#c8e6c9')),
-    ]))
-    story.append(stats_table)
-    story.append(Spacer(1, 0.4*inch))
-    
-    # Weekly Adherence Chart
-    weekly_heading = Paragraph("📅 Weekly Adherence (Last 7 Days)", heading_style)
-    story.append(weekly_heading)
-    
-    weekly_data = calculate_weekly_adherence(user_id)
-    weekly_table_data = [["Day", "Adherence Rate"]]
-    for day, rate in weekly_data.items():
-        weekly_table_data.append([day, f"{rate}%"])
-    
-    weekly_table = Table(weekly_table_data, colWidths=[1.5*inch, 2*inch])
-    weekly_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#7b1fa2')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e1bee7')),
-    ]))
-    story.append(weekly_table)
-    story.append(Spacer(1, 0.4*inch))
-    
-    story.append(PageBreak())
-    
-    # Medicines List
-    meds_heading = Paragraph("💊 Current Medications", heading_style)
-    story.append(meds_heading)
-    
-    if medicines:
-        for idx, med in enumerate(medicines, 1):
-            med_id, user_id_val, name, dosage, med_type, times_str, time_labels_str, notes, start_date, end_date, paused, color = med
-            
-            med_subheading = Paragraph(f"<b>{idx}. {name}</b>", normal_style)
-            story.append(med_subheading)
-            
-            time_slots = [t.strip() for t in times_str.split(",") if t.strip()]
-            time_labels = [l.strip() for l in time_labels_str.split(",") if l.strip()] if time_labels_str else [""] * len(time_slots)
-            
-            # Calculate intake stats for this medicine
-            cursor.execute(f"SELECT COUNT(*) FROM tracking WHERE medicine_id={med_id} AND taken=1")
-            total_intakes = cursor.fetchone()[0]
-            
-            med_details = [
-                ["Dosage", dosage],
-                ["Type", med_type],
-                ["Scheduled Times", ", ".join([f"{t} ({l})" for t, l in zip(time_slots, time_labels)])],
-                ["Status", "⏸️ Paused" if paused else "✅ Active"],
-                ["Total Doses Taken", str(total_intakes)],
-                ["Start Date", start_date if start_date else "N/A"],
-                ["End Date", end_date if end_date else "Ongoing"],
-                ["Notes", notes if notes else "None"]
-            ]
-            
-            med_table = Table(med_details, colWidths=[1.5*inch, 4*inch])
-            med_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#e3f2fd')),
-                ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#1565c0')),
-                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-                ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#f5f5f5')),
-                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#bbdefb')),
-            ]))
-            story.append(med_table)
-            story.append(Spacer(1, 0.2*inch))
-    else:
-        no_meds = Paragraph("No medications found in your records.", normal_style)
-        story.append(no_meds)
-    
-    story.append(Spacer(1, 0.4*inch))
-    story.append(PageBreak())
-    
-    # Recent Intake History (Last 30 days)
-    history_heading = Paragraph("📋 Recent Intake History (Last 30 Days)", heading_style)
-    story.append(history_heading)
-    
-    history_data = [["Date", "Medicine", "Time Slot", "Status", "Taken At"]]
-    has_history = False
-    
-    for i in range(30):
-        check_date = (date.today() - timedelta(days=i)).strftime('%Y-%m-%d')
-        meds_for_date = get_medicines_for_date(user_id, check_date)
-        
-        for med in meds_for_date:
-            for time_slot in med['times']:
-                cursor.execute(
-                    "SELECT taken, timestamp FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
-                    (med['id'], check_date, time_slot)
-                )
-                result = cursor.fetchone()
-                
-                if result:
-                    has_history = True
-                    is_taken, timestamp = result
-                    status = "✅ Taken" if is_taken else "❌ Missed"
-                    taken_at = timestamp.strftime('%I:%M %p') if timestamp else "N/A"
-                    
-                    history_data.append([
-                        check_date,
-                        med['name'],
-                        time_slot,
-                        status,
-                        taken_at
-                    ])
-    
-    if has_history:
-        history_table = Table(history_data, colWidths=[1.2*inch, 2*inch, 1*inch, 1.2*inch, 1.2*inch])
-        history_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#7b1fa2')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e1bee7')),
-        ]))
-        story.append(history_table)
-    else:
-        no_history = Paragraph("No intake history found for the last 30 days.", normal_style)
-        story.append(no_history)
-    
-    story.append(Spacer(1, 0.4*inch))
-    
-    # Footer
-    footer = Paragraph(
-        "<i>This report was generated automatically by Dr.Pill Medicine Tracker. "
-        "Please consult your healthcare provider for medical advice.</i>",
-        ParagraphStyle('Footer', parent=styles['Normal'], fontSize=9, textColor=colors.grey, alignment=TA_CENTER)
-    )
-    story.append(footer)
-    
-    # Build PDF
-    doc.build(story)
-    
-    # Get PDF data
-    buffer.seek(0)
-    pdf_data = buffer.getvalue()
-    buffer.close()
-    
-    return pdf_data
+    data = {
+        'user': {
+            'name': user[1],
+            'email': user[2],
+            'age': user[4],
+            'conditions': user[5],
+            'phone': user[6],
+            'email_address': user[7]
+        },
+        'medicines': [
+            {
+                'id': m[0],
+                'name': m[2],
+                'dosage': m[3],
+                'med_type': m[4],
+                'times': m[5],
+                'time_labels': m[6],
+                'notes': m[7],
+                'start_date': m[8],
+                'end_date': m[9],
+                'paused': m[10],
+                'color': m[11]
+            }
+            for m in medicines
+        ],
+        'tracking': [
+            {
+                'medicine_id': t[1],
+                'date': t[2],
+                'time_slot': t[3],
+                'taken': t[4],
+                'timestamp': t[5]
+            }
+            for t in tracking_data
+        ]
+    }
+    return json.dumps(data, indent=2)
 
-# ================= MASCOT FUNCTIONS =================
-def render_emoji_mascot(emotion, message, missed_list=None):
-    """Render emoji-based mascot - always works!"""
+# ================= MASCOT CONFIGURATION =================
+# Configure mascot paths - update these paths based on your actual folder structure
+def get_mascot_path(emotion):
+    """
+    Get the path to mascot image based on emotion.
     
-    # Map emotions to emojis and CSS classes
-    mascot_data = {
-        'happy': {
-            'emoji': '💊',
-            'css_class': 'emoji-mascot'
-        },
-        'sad': {
-            'emoji': '😢',
-            'css_class': 'emoji-mascot-sad'
-        },
-        'urgent': {
-            'emoji': '😰',
-            'css_class': 'emoji-mascot-urgent'
-        },
-        'sleepy': {
-            'emoji': '😴',
-            'css_class': 'emoji-mascot-sleepy'
-        }
+    Adjust these paths to match your actual folder structure.
+    Common patterns:
+    - If mascot folder is in the same directory as this script: "mascots/happy_pill.png"
+    - If mascot folder is in dr.pill folder: "dr.pill/mascots/happy_pill.png"
+    - If mascot folder is in parent folder: "../mascots/happy_pill.png"
+    """
+    
+    # Define your mascot image paths here
+    # You can use absolute paths or relative paths
+    # Example relative path from script location:
+    
+    mascot_paths = {
+        'happy': 'mascots/waving pill.png',           # Update this path
+        'sad': 'mascots/sad pill.png',               # Update this path
+        'urgent': 'mascots/Angry pill.png',          # Update this path
+        'sleepy': 'mascots/Doubt pill.png'           # Update this path
     }
     
-    data = mascot_data.get(emotion, mascot_data['happy'])
+    # Get the path for the requested emotion
+    path = mascot_paths.get(emotion, mascot_paths['happy'])
     
-    st.markdown(f"""
-    <div class="mascot-container">
-        <div class="{data['css_class']}">
-            {data['emoji']}
+    # Try to construct absolute path
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    abs_path = os.path.join(script_dir, path)
+    
+    # If file doesn't exist at the expected location, show debug info
+    if not os.path.exists(abs_path):
+        st.warning(f"Mascot image not found at: {abs_path}")
+        st.info(f"Current working directory: {os.getcwd()}")
+        st.info(f"Script directory: {script_dir}")
+        return None
+    
+    return abs_path
+
+def get_mascot_css_class(emotion):
+    """Get CSS class for mascot animation"""
+    css_classes = {
+        'happy': 'mascot',
+        'sad': 'mascot-sad',
+        'urgent': 'mascot-urgent',
+        'sleepy': 'mascot-sleepy'
+    }
+    return css_classes.get(emotion, 'mascot')
+
+def render_pill_mascot(emotion, message, missed_list=None):
+    """Render the pill mascot with different emotions"""
+    
+    # Get mascot image path
+    img_path = get_mascot_path(emotion)
+    
+    # Get CSS class for animation
+    css_class = get_mascot_css_class(emotion)
+    
+    if img_path and os.path.exists(img_path):
+        # Render with actual image
+        st.markdown(f"""
+        <div class="mascot-container">
+            <div class="{css_class}">
+                <img src="file://{img_path}" style="width:160px; border-radius: 10px;">
+            </div>
+            <h2 style="color: #9c27b0; margin-top: 1rem;">{message}</h2>
         </div>
-        <h2 style="color: #9c27b0; margin-top: 1rem;">{message}</h2>
-    </div>
-    """, unsafe_allow_html=True)
-    
+        """, unsafe_allow_html=True)
+    else:
+        # Fallback to emoji if image not found
+        emoji_map = {
+            'happy': '😊',
+            'sad': '😢',
+            'urgent': '😰',
+            'sleepy': '😴'
+        }
+        fallback_emoji = emoji_map.get(emotion, '💊')
+        
+        st.markdown(f"""
+        <div class="mascot-container">
+            <div class="{css_class}" style="font-size: 8rem;">
+                {fallback_emoji}
+            </div>
+            <h2 style="color: #9c27b0; margin-top: 1rem;">{message}</h2>
+            <p style="color: #666;">(Mascot image not loaded - using emoji fallback)</p>
+        </div>
+        """, unsafe_allow_html=True)
+
     if missed_list:
         st.markdown("### 📋 Missed Today:")
         for med in missed_list:
@@ -1053,6 +759,7 @@ def render_emoji_mascot(emotion, message, missed_list=None):
                 <p>🕐 Scheduled for {med['time']}</p>
             </div>
             """, unsafe_allow_html=True)
+
 
 # ================= HELPER FUNCTIONS =================
 def get_medicine_status(medicine, time_slot, current_time, user_id):
@@ -1271,7 +978,7 @@ elif st.session_state.user and st.session_state.page == "home":
     
     # Show mascot if there are medicines
     if mascot_state and today_medicines:
-        render_emoji_mascot(
+        render_pill_mascot(
             mascot_state['emotion'],
             mascot_state['message'],
             mascot_state['missed_list']
@@ -1381,12 +1088,10 @@ elif st.session_state.user and st.session_state.page == "profile":
         
         if submitted:
             if name:
-                if update_user(user_id, name, age, conditions, phone, email_address):
-                    st.session_state.user = get_user_by_id(user_id)
-                    st.success(f"✅ Profile saved! 💕")
-                    st.balloons()
-                else:
-                    st.error("Error saving profile 😊")
+                update_user(user_id, name, age, conditions, phone, email_address)
+                st.session_state.user = get_user_by_id(user_id)
+                st.success(f"✅ Profile saved! 💕")
+                st.balloons()
             else:
                 st.error("Please enter your name! 😊")
     
@@ -1907,22 +1612,31 @@ elif st.session_state.user and st.session_state.page == "calendar":
     
     weekly_data = calculate_weekly_adherence(user_id)
     
-    # Create simple HTML bar chart instead of plotly
-    weekly_html = """
-    <div style="display: flex; justify-content: space-around; align-items: flex-end; height: 200px; padding: 20px; background: white; border-radius: 15px;">
-    """
-    for day, rate in weekly_data.items():
-        bar_color = "#81c784" if rate >= 80 else "#ffd54f" if rate >= 50 else "#e57373"
-        bar_height = f"{rate * 2}px"
-        weekly_html += f"""
-        <div style="text-align: center; margin: 0 10px;">
-            <div style="background: {bar_color}; width: 40px; height: {bar_height}; border-radius: 5px 5px 0 0; margin-bottom: 10px;"></div>
-            <div style="font-weight: bold;">{day}</div>
-            <div style="font-size: 0.9rem;">{rate}%</div>
-        </div>
-        """
-    weekly_html += "</div>"
-    st.markdown(weekly_html, unsafe_allow_html=True)
+    # Create bar chart
+    weekly_values = list(weekly_data.values())
+    marker_colors = ['#81c784' if v >= 80 else '#ffd54f' if v >= 50 else '#e57373' for v in weekly_values]
+    
+    fig = go.Figure(data=[
+        go.Bar(
+            x=list(weekly_data.keys()),
+            y=weekly_values,
+            marker_color=marker_colors,
+            text=weekly_values,
+            texttemplate='%{text}%',
+            textposition='outside'
+        )
+    ])
+    
+    fig.update_layout(
+        title="Last 7 Days Adherence",
+        xaxis_title="Day",
+        yaxis_title="Adherence %",
+        yaxis_range=[0, 105],
+        height=400,
+        showlegend=False
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
 
 # ================= SETTINGS PAGE =================
 elif st.session_state.user and st.session_state.page == "settings":
@@ -2006,120 +1720,23 @@ elif st.session_state.user and st.session_state.page == "settings":
     
     st.markdown("---")
     
-    # Weekly Adherence Section
-    st.markdown("## 📊 Weekly Adherence Overview")
-    
-    # Weekly stats cards
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Weekly Average", f"{stats['weekly_avg']}%")
-    with col2:
-        st.metric("Best Day", f"{stats['weekly_best']}%")
-    with col3:
-        st.metric("Worst Day", f"{stats['weekly_worst']}%")
-    with col4:
-        improvement = stats['weekly_avg'] - stats['weekly_worst']
-        st.metric("Improvement Needed", f"{improvement}%" if improvement > 0 else "Perfect!")
-    
-    # Weekly bar chart
-    weekly_data = stats['weekly_data']
-    weekly_html = """
-    <div style="display: flex; justify-content: space-around; align-items: flex-end; height: 200px; padding: 20px; background: white; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-    """
-    for day, rate in weekly_data.items():
-        bar_color = "#81c784" if rate >= 80 else "#ffd54f" if rate >= 50 else "#e57373"
-        bar_height = f"{rate * 2}px"
-        weekly_html += f"""
-        <div style="text-align: center; margin: 0 10px;">
-            <div style="background: {bar_color}; width: 40px; height: {bar_height}; border-radius: 5px 5px 0 0; margin-bottom: 10px; transition: all 0.3s;"></div>
-            <div style="font-weight: bold; color: #9c27b0;">{day}</div>
-            <div style="font-size: 0.9rem; color: #666;">{rate}%</div>
-        </div>
-        """
-    weekly_html += "</div>"
-    st.markdown(weekly_html, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Monthly Adherence Section
-    st.markdown("## 📅 Monthly Adherence Overview")
-    
-    # Monthly stats cards
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Monthly Average", f"{stats['monthly_avg']}%")
-    with col2:
-        st.metric("Best Day", f"{stats['monthly_best']}%")
-    with col3:
-        st.metric("Worst Day", f"{stats['monthly_worst']}%")
-    with col4:
-        days_tracked = len(stats['monthly_data'])
-        st.metric("Days Tracked", days_tracked)
-    
-    # Monthly progress bar
-    st.markdown("### Monthly Progress")
-    st.progress(stats['monthly_avg'] / 100)
-    st.markdown(f"**{stats['monthly_avg']}% average adherence this month**")
-    
-    # Monthly trend visualization
-    if stats['monthly_data']:
-        st.markdown("### Daily Trends This Month")
-        monthly_dates = list(stats['monthly_data'].keys())[-14:]  # Last 14 days
-        monthly_values = [stats['monthly_data'][d] for d in monthly_dates]
-        
-        monthly_html = """
-        <div style="display: flex; overflow-x: auto; padding: 10px; background: white; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-        """
-        for date_str, rate in zip(monthly_dates, monthly_values):
-            day_short = datetime.strptime(date_str, '%Y-%m-%d').strftime('%m/%d')
-            bar_color = "#81c784" if rate >= 80 else "#ffd54f" if rate >= 50 else "#e57373"
-            bar_height = f"{rate * 1.5}px"
-            monthly_html += f"""
-            <div style="text-align: center; margin: 0 8px; min-width: 50px;">
-                <div style="background: {bar_color}; width: 30px; height: {bar_height}; border-radius: 5px 5px 0 0; margin-bottom: 5px; min-height: 20px;"></div>
-                <div style="font-size: 0.7rem; color: #666;">{day_short}</div>
-                <div style="font-size: 0.8rem; font-weight: bold; color: #9c27b0;">{rate}%</div>
-            </div>
-            """
-        monthly_html += "</div>"
-        st.markdown(monthly_html, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Health Tips Section
-    st.markdown("## 💡 Personalized Health Tips")
-    
-    tips = get_health_tips(stats)
-    
-    for i, tip in enumerate(tips, 1):
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #fff9c4 0%, #ffecb3 100%); border-radius: 15px; padding: 1rem; margin: 0.5rem 0; border-left: 4px solid #ffc107; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <p style="margin: 0; font-size: 1.1rem; color: #333;"><strong>Tip {i}:</strong> {tip}</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
     # Data Management
     st.markdown("## 💾 Data Management")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### 📥 Download Report (PDF)")
-        if st.button("Generate PDF Report", use_container_width=True):
-            with st.spinner("Generating your PDF report..."):
-                pdf_data = generate_pdf_report(user_id)
-                
-                st.download_button(
-                    label="💾 Download Report",
-                    data=pdf_data,
-                    file_name=f"DrPill_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
-                )
-                
-                st.success("✅ PDF report generated successfully!")
+        st.markdown("### Export Data")
+        if st.button("📥 Download Backup (JSON)", use_container_width=True):
+            json_data = export_user_data(user_id)
+            st.download_button(
+                label="💾 Download",
+                data=json_data,
+                file_name=f"dr_pill_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                use_container_width=True
+            )
+            st.success("✅ Backup ready for download!")
     
     with col2:
         st.markdown("### Danger Zone")
