@@ -1,12 +1,13 @@
+# Dr.Pill - Medicine Tracker (FIXED VERSION)
+# This version includes the mascot path fix and session state database
+
 import streamlit as st
-import sqlite3
-import pandas as pd
 from datetime import date, datetime, timedelta, time
 import calendar
 import json
+import os
 import plotly.graph_objects as go
 from typing import List, Dict, Optional
-import os
 
 # ================= PAGE CONFIG =================
 st.set_page_config(
@@ -274,139 +275,213 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= DATABASE ====================
-@st.cache_resource
-def init_db():
-    conn = sqlite3.connect("drpill.db", check_same_thread=False)
-    cursor = conn.cursor()
-    
-    # Create users table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT,
-        email TEXT UNIQUE,
-        password TEXT,
-        age INTEGER,
-        conditions TEXT,
-        phone TEXT,
-        email_address TEXT
-    )
-    """)
-    
-    # Create medicines table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS medicines (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        name TEXT,
-        dosage TEXT,
-        med_type TEXT,
-        times TEXT,
-        time_labels TEXT,
-        notes TEXT,
-        start_date TEXT,
-        end_date TEXT,
-        paused BOOLEAN DEFAULT 0,
-        color TEXT DEFAULT '#9c27b0',
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-    """)
-    
-    # Create tracking table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS tracking (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        medicine_id INTEGER,
-        date TEXT,
-        time_slot TEXT,
-        taken BOOLEAN DEFAULT 0,
-        timestamp DATETIME,
-        FOREIGN KEY (medicine_id) REFERENCES medicines(id)
-    )
-    """)
-    
-    # Create settings table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS settings (
-        user_id INTEGER PRIMARY KEY,
-        reminders_enabled BOOLEAN DEFAULT 1,
-        reminder_advance_minutes INTEGER DEFAULT 30,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-    """)
-    
-    conn.commit()
-    return conn
+# ================= SESSION STATE DATABASE =================
 
-conn = init_db()
-cursor = conn.cursor()
+def init_session_state():
+    """Initialize all session state variables for data persistence"""
+    
+    # Authentication state
+    if 'auth_mode' not in st.session_state:
+        st.session_state.auth_mode = None
+    
+    if 'user' not in st.session_state:
+        st.session_state.user = None
+    
+    if 'page' not in st.session_state:
+        st.session_state.page = "home"
+    
+    # Calendar state
+    if 'cal_year' not in st.session_state:
+        today = date.today()
+        st.session_state.cal_year = today.year
+        st.session_state.cal_month = today.month
+    
+    # Medicine editing state
+    if 'edit_medicine_id' not in st.session_state:
+        st.session_state.edit_medicine_id = None
+    
+    # Shopping cart and orders
+    if 'cart' not in st.session_state:
+        st.session_state.cart = []
+    
+    if 'orders' not in st.session_state:
+        st.session_state.orders = []
+    
+    # DATABASE - Using session state instead of SQLite
+    if 'users_db' not in st.session_state:
+        st.session_state.users_db = {}
+    
+    if 'medicines_db' not in st.session_state:
+        st.session_state.medicines_db = {}
+    
+    if 'tracking_db' not in st.session_state:
+        st.session_state.tracking_db = {}
+    
+    if 'settings_db' not in st.session_state:
+        st.session_state.settings_db = {}
+    
+    # ID counters
+    if 'next_user_id' not in st.session_state:
+        st.session_state.next_user_id = 1
+    
+    if 'next_medicine_id' not in st.session_state:
+        st.session_state.next_medicine_id = 1
+    
+    # Calendar view state
+    if 'view_day_details' not in st.session_state:
+        st.session_state.view_day_details = False
+    
+    if 'selected_date' not in st.session_state:
+        st.session_state.selected_date = None
 
-# ================= DB FUNCTIONS =================
+# ================= DATABASE FUNCTIONS =================
+
 def create_user(name, email, password, age, conditions="", phone="", email_address=""):
-    try:
-        cursor.execute(
-            "INSERT INTO users (name, email, password, age, conditions, phone, email_address) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name, email, password, age, conditions, phone, email_address)
-        )
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
+    """Create a new user in session state"""
+    if email in st.session_state.users_db:
         return False
+    
+    user_id = st.session_state.next_user_id
+    st.session_state.users_db[email] = {
+        'id': user_id,
+        'name': name,
+        'email': email,
+        'password': password,
+        'age': age,
+        'conditions': conditions,
+        'phone': phone,
+        'email_address': email_address
+    }
+    
+    # Initialize settings for new user
+    st.session_state.settings_db[user_id] = {
+        'user_id': user_id,
+        'reminders_enabled': True,
+        'reminder_advance_minutes': 30
+    }
+    
+    st.session_state.next_user_id += 1
+    return True
 
 def login_user(email, password):
-    cursor.execute(
-        "SELECT * FROM users WHERE email=? AND password=?",
-        (email, password)
-    )
-    return cursor.fetchone()
+    """Authenticate user and return user data"""
+    if email in st.session_state.users_db:
+        user = st.session_state.users_db[email]
+        if user['password'] == password:
+            return (user['id'], user['name'], user['email'], user['password'],
+                   user['age'], user['conditions'], user['phone'], user['email_address'])
+    return None
 
 def get_user_by_id(user_id):
-    cursor.execute("SELECT * FROM users WHERE id=?", (user_id,))
-    return cursor.fetchone()
+    """Get user by ID"""
+    for email, user in st.session_state.users_db.items():
+        if user['id'] == user_id:
+            return (user['id'], user['name'], user['email'], user['password'],
+                   user['age'], user['conditions'], user['phone'], user['email_address'])
+    return None
 
 def update_user(user_id, name, age, conditions, phone, email_address):
-    cursor.execute(
-        "UPDATE users SET name=?, age=?, conditions=?, phone=?, email_address=? WHERE id=?",
-        (name, age, conditions, phone, email_address, user_id)
-    )
-    conn.commit()
+    """Update user information"""
+    for email, user in st.session_state.users_db.items():
+        if user['id'] == user_id:
+            user['name'] = name
+            user['age'] = age
+            user['conditions'] = conditions
+            user['phone'] = phone
+            user['email_address'] = email_address
+            return True
+    return False
 
 def save_medicine(user_id, name, dosage, med_type, times, time_labels, notes, start_date, end_date, color):
-    cursor.execute(
-        "INSERT INTO medicines (user_id, name, dosage, med_type, times, time_labels, notes, start_date, end_date, color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (user_id, name, dosage, med_type, times, time_labels, notes, start_date, end_date, color)
-    )
-    conn.commit()
-    return cursor.lastrowid
+    """Save a new medicine for a user"""
+    med_id = st.session_state.next_medicine_id
+    
+    if user_id not in st.session_state.medicines_db:
+        st.session_state.medicines_db[user_id] = {}
+    
+    st.session_state.medicines_db[user_id][med_id] = {
+        'id': med_id,
+        'user_id': user_id,
+        'name': name,
+        'dosage': dosage,
+        'med_type': med_type,
+        'times': times,
+        'time_labels': time_labels,
+        'notes': notes,
+        'start_date': start_date,
+        'end_date': end_date,
+        'paused': False,
+        'color': color
+    }
+    
+    st.session_state.next_medicine_id += 1
+    return med_id
 
 def get_user_medicines(user_id):
-    cursor.execute("SELECT * FROM medicines WHERE user_id=?", (user_id,))
-    return cursor.fetchall()
+    """Get all medicines for a user"""
+    if user_id in st.session_state.medicines_db:
+        medicines = st.session_state.medicines_db[user_id].values()
+        result = []
+        for med in medicines:
+            result.append((
+                med['id'], med['user_id'], med['name'], med['dosage'],
+                med['med_type'], med['times'], med['time_labels'], med['notes'],
+                med['start_date'], med['end_date'], med['paused'], med['color']
+            ))
+        return result
+    return []
 
 def get_medicine_by_id(med_id):
-    cursor.execute("SELECT * FROM medicines WHERE id=?", (med_id,))
-    return cursor.fetchone()
+    """Get medicine by ID"""
+    for user_id, medicines in st.session_state.medicines_db.items():
+        if med_id in medicines:
+            med = medicines[med_id]
+            return (
+                med['id'], med['user_id'], med['name'], med['dosage'],
+                med['med_type'], med['times'], med['time_labels'], med['notes'],
+                med['start_date'], med['end_date'], med['paused'], med['color']
+            )
+    return None
 
 def update_medicine(med_id, name, dosage, med_type, times, time_labels, notes, start_date, end_date, color):
-    cursor.execute(
-        "UPDATE medicines SET name=?, dosage=?, med_type=?, times=?, time_labels=?, notes=?, start_date=?, end_date=?, color=? WHERE id=?",
-        (name, dosage, med_type, times, time_labels, notes, start_date, end_date, color, med_id)
-    )
-    conn.commit()
+    """Update medicine information"""
+    for user_id, medicines in st.session_state.medicines_db.items():
+        if med_id in medicines:
+            medicines[med_id]['name'] = name
+            medicines[med_id]['dosage'] = dosage
+            medicines[med_id]['med_type'] = med_type
+            medicines[med_id]['times'] = times
+            medicines[med_id]['time_labels'] = time_labels
+            medicines[med_id]['notes'] = notes
+            medicines[med_id]['start_date'] = start_date
+            medicines[med_id]['end_date'] = end_date
+            medicines[med_id]['color'] = color
+            return True
+    return False
 
 def delete_medicine(med_id):
-    cursor.execute("DELETE FROM medicines WHERE id=?", (med_id,))
-    cursor.execute("DELETE FROM tracking WHERE medicine_id=?", (med_id,))
-    conn.commit()
+    """Delete a medicine and its tracking records"""
+    for user_id, medicines in st.session_state.medicines_db.items():
+        if med_id in medicines:
+            del medicines[med_id]
+            # Delete related tracking records
+            keys_to_delete = [k for k in st.session_state.tracking_db.keys() if k[0] == med_id]
+            for key in keys_to_delete:
+                del st.session_state.tracking_db[key]
+            return True
+    return False
 
 def toggle_medicine_pause(med_id):
-    cursor.execute("UPDATE medicines SET paused = NOT paused WHERE id=?", (med_id,))
-    conn.commit()
+    """Toggle pause status of a medicine"""
+    for user_id, medicines in st.session_state.medicines_db.items():
+        if med_id in medicines:
+            medicines[med_id]['paused'] = not medicines[med_id]['paused']
+            return True
+    return False
 
 def get_medicines_for_date(user_id, target_date):
-    cursor.execute("SELECT * FROM medicines WHERE user_id=?", (user_id,))
-    medicines = cursor.fetchall()
+    """Get all medicines scheduled for a specific date"""
+    medicines = get_user_medicines(user_id)
     scheduled_meds = []
     
     for med in medicines:
@@ -416,7 +491,7 @@ def get_medicines_for_date(user_id, target_date):
         
         if paused:
             continue
-            
+        
         if med_type == 'Daily (Ongoing)' or (med_type == 'Date Range' and start_date and end_date and start_date <= target_date <= end_date):
             if time_slots:
                 scheduled_meds.append({
@@ -433,53 +508,49 @@ def get_medicines_for_date(user_id, target_date):
     return scheduled_meds
 
 def mark_as_taken(medicine_id, target_date, time_slot):
-    cursor.execute(
-        "SELECT id FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
-        (medicine_id, target_date, time_slot)
-    )
-    exists = cursor.fetchone()
+    """Mark a medicine dose as taken"""
+    key = (medicine_id, target_date, time_slot)
     
-    if exists:
-        cursor.execute(
-            "UPDATE tracking SET taken=?, timestamp=? WHERE medicine_id=? AND date=? AND time_slot=?",
-            (True, datetime.now(), medicine_id, target_date, time_slot)
-        )
+    if key in st.session_state.tracking_db:
+        st.session_state.tracking_db[key]['taken'] = True
+        st.session_state.tracking_db[key]['timestamp'] = datetime.now()
     else:
-        cursor.execute(
-            "INSERT INTO tracking (medicine_id, date, time_slot, taken, timestamp) VALUES (?, ?, ?, ?, ?)",
-            (medicine_id, target_date, time_slot, True, datetime.now())
-        )
-    conn.commit()
+        st.session_state.tracking_db[key] = {
+            'id': len(st.session_state.tracking_db) + 1,
+            'medicine_id': medicine_id,
+            'date': target_date,
+            'time_slot': time_slot,
+            'taken': True,
+            'timestamp': datetime.now()
+        }
 
 def toggle_intake(medicine_id, target_date, time_slot):
-    cursor.execute(
-        "SELECT id, taken FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
-        (medicine_id, target_date, time_slot)
-    )
-    result = cursor.fetchone()
+    """Toggle intake status of a medicine dose"""
+    key = (medicine_id, target_date, time_slot)
     
-    if result:
-        track_id, taken = result
-        cursor.execute(
-            "UPDATE tracking SET taken=?, timestamp=? WHERE id=?",
-            (not taken, datetime.now() if not taken else None, track_id)
-        )
+    if key in st.session_state.tracking_db:
+        tracking = st.session_state.tracking_db[key]
+        tracking['taken'] = not tracking['taken']
+        tracking['timestamp'] = datetime.now() if tracking['taken'] else None
     else:
-        cursor.execute(
-            "INSERT INTO tracking (medicine_id, date, time_slot, taken, timestamp) VALUES (?, ?, ?, ?, ?)",
-            (medicine_id, target_date, time_slot, True, datetime.now())
-        )
-    conn.commit()
+        st.session_state.tracking_db[key] = {
+            'id': len(st.session_state.tracking_db) + 1,
+            'medicine_id': medicine_id,
+            'date': target_date,
+            'time_slot': time_slot,
+            'taken': True,
+            'timestamp': datetime.now()
+        }
 
 def get_intake_status(medicine_id, target_date, time_slot):
-    cursor.execute(
-        "SELECT taken FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
-        (medicine_id, target_date, time_slot)
-    )
-    result = cursor.fetchone()
-    return result[0] if result else False
+    """Check if a medicine dose has been taken"""
+    key = (medicine_id, target_date, time_slot)
+    if key in st.session_state.tracking_db:
+        return st.session_state.tracking_db[key]['taken']
+    return False
 
 def calculate_adherence(user_id, target_date):
+    """Calculate adherence percentage for a specific date"""
     scheduled_meds = get_medicines_for_date(user_id, target_date)
     if not scheduled_meds:
         return 100
@@ -490,12 +561,7 @@ def calculate_adherence(user_id, target_date):
     for med in scheduled_meds:
         for time_slot in med['times']:
             total_slots += 1
-            cursor.execute(
-                "SELECT taken FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
-                (med['id'], target_date, time_slot)
-            )
-            result = cursor.fetchone()
-            if result and result[0]:
+            if get_intake_status(med['id'], target_date, time_slot):
                 taken_slots += 1
     
     if total_slots == 0:
@@ -504,6 +570,7 @@ def calculate_adherence(user_id, target_date):
     return int((taken_slots / total_slots) * 100)
 
 def calculate_weekly_adherence(user_id):
+    """Calculate adherence for the last 7 days"""
     weekly_data = {}
     for i in range(7):
         d = date.today()
@@ -515,11 +582,12 @@ def calculate_weekly_adherence(user_id):
     return weekly_data
 
 def get_adherence_stats(user_id):
+    """Get comprehensive adherence statistics"""
     today = date.today().strftime("%Y-%m-%d")
     today_adherence = calculate_adherence(user_id, today)
     medicines = get_user_medicines(user_id)
     total_meds = len(medicines)
-    active_meds = len([m for m in medicines if not m[10]])  # m[10] is paused
+    active_meds = len([m for m in medicines if not m[10]])
     
     # Get adherence for last 7 days
     last_7_days = []
@@ -540,12 +608,7 @@ def get_adherence_stats(user_id):
         for med in meds_for_date:
             for time_slot in med['times']:
                 total_scheduled_30d += 1
-                cursor.execute(
-                    "SELECT taken FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
-                    (med['id'], check_date, time_slot)
-                )
-                result = cursor.fetchone()
-                if result and result[0]:
+                if get_intake_status(med['id'], check_date, time_slot):
                     total_taken_30d += 1
     
     overall_adherence = int((total_taken_30d / total_scheduled_30d * 100)) if total_scheduled_30d > 0 else 0
@@ -560,30 +623,30 @@ def get_adherence_stats(user_id):
     }
 
 def get_settings(user_id):
-    cursor.execute("SELECT * FROM settings WHERE user_id=?", (user_id,))
-    result = cursor.fetchone()
-    if result:
+    """Get user settings"""
+    if user_id in st.session_state.settings_db:
+        settings = st.session_state.settings_db[user_id]
         return {
-            'reminders_enabled': result[1],
-            'reminder_advance_minutes': result[2]
+            'reminders_enabled': settings['reminders_enabled'],
+            'reminder_advance_minutes': settings['reminder_advance_minutes']
         }
     else:
         # Create default settings
-        cursor.execute(
-            "INSERT INTO settings (user_id, reminders_enabled, reminder_advance_minutes) VALUES (?, 1, 30)",
-            (user_id,)
-        )
-        conn.commit()
+        st.session_state.settings_db[user_id] = {
+            'user_id': user_id,
+            'reminders_enabled': True,
+            'reminder_advance_minutes': 30
+        }
         return {'reminders_enabled': True, 'reminder_advance_minutes': 30}
 
 def update_settings(user_id, reminders_enabled, reminder_advance_minutes):
-    cursor.execute(
-        "UPDATE settings SET reminders_enabled=?, reminder_advance_minutes=? WHERE user_id=?",
-        (reminders_enabled, reminder_advance_minutes, user_id)
-    )
-    conn.commit()
+    """Update user settings"""
+    if user_id in st.session_state.settings_db:
+        st.session_state.settings_db[user_id]['reminders_enabled'] = reminders_enabled
+        st.session_state.settings_db[user_id]['reminder_advance_minutes'] = reminder_advance_minutes
 
 def get_upcoming_reminders(user_id):
+    """Get upcoming medicine reminders"""
     current_time = datetime.now()
     today = current_time.strftime('%Y-%m-%d')
     today_medicines = get_medicines_for_date(user_id, today)
@@ -592,7 +655,6 @@ def get_upcoming_reminders(user_id):
     upcoming = []
     for medicine in today_medicines:
         for time_slot in medicine['times']:
-            # Check if not taken yet
             is_taken = get_intake_status(medicine['id'], today, time_slot)
             
             if not is_taken:
@@ -615,13 +677,23 @@ def get_upcoming_reminders(user_id):
     return sorted(upcoming, key=lambda x: x['minutes_until'])
 
 def export_user_data(user_id):
+    """Export all user data as JSON"""
     user = get_user_by_id(user_id)
     medicines = get_user_medicines(user_id)
     
+    # Get tracking data
     tracking_data = []
     for med in medicines:
-        cursor.execute("SELECT * FROM tracking WHERE medicine_id=?", (med[0],))
-        tracking_data.extend(cursor.fetchall())
+        med_id = med[0]
+        for key, tracking in st.session_state.tracking_db.items():
+            if key[0] == med_id:
+                tracking_data.append({
+                    'medicine_id': tracking['medicine_id'],
+                    'date': tracking['date'],
+                    'time_slot': tracking['time_slot'],
+                    'taken': tracking['taken'],
+                    'timestamp': tracking['timestamp']
+                })
     
     data = {
         'user': {
@@ -648,58 +720,40 @@ def export_user_data(user_id):
             }
             for m in medicines
         ],
-        'tracking': [
-            {
-                'medicine_id': t[1],
-                'date': t[2],
-                'time_slot': t[3],
-                'taken': t[4],
-                'timestamp': t[5]
-            }
-            for t in tracking_data
-        ]
+        'tracking': tracking_data
     }
     return json.dumps(data, indent=2)
 
-# ================= MASCOT CONFIGURATION =================
-# Configure mascot paths - update these paths based on your actual folder structure
+# ================= MASCOT CONFIGURATION (FIXED) =================
+
 def get_mascot_path(emotion):
-    """
-    Get the path to mascot image based on emotion.
+    """Get the path to mascot image based on emotion with corrected paths"""
     
-    Adjust these paths to match your actual folder structure.
-    Common patterns:
-    - If mascot folder is in the same directory as this script: "mascots/happy_pill.png"
-    - If mascot folder is in dr.pill folder: "dr.pill/mascots/happy_pill.png"
-    - If mascot folder is in parent folder: "../mascots/happy_pill.png"
-    """
-    
-    # Define your mascot image paths here
-    # You can use absolute paths or relative paths
-    # Example relative path from script location:
-    
-    mascot_paths = {
-        'happy': 'mascots/waving pill.png',           # Update this path
-        'sad': 'mascots/sad pill.png',               # Update this path
-        'urgent': 'mascots/Angry pill.png',          # Update this path
-        'sleepy': 'mascots/Doubt pill.png'           # Update this path
+    # Map emotions to actual file names
+    emotion_file_map = {
+        'happy': 'waving pill',
+        'sad': 'sad pill',
+        'urgent': 'Angry pill',
+        'sleepy': 'Doubt pill'
     }
     
-    # Get the path for the requested emotion
-    path = mascot_paths.get(emotion, mascot_paths['happy'])
-    
-    # Try to construct absolute path
+    # Get the script's directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    abs_path = os.path.join(script_dir, path)
     
-    # If file doesn't exist at the expected location, show debug info
-    if not os.path.exists(abs_path):
-        st.warning(f"Mascot image not found at: {abs_path}")
-        st.info(f"Current working directory: {os.getcwd()}")
-        st.info(f"Script directory: {script_dir}")
-        return None
+    # Try multiple possible paths in order
+    possible_paths = [
+        f'DR.pills/mascots/{emotion_file_map[emotion]}.png',
+        f'mascots/{emotion_file_map[emotion]}.png',
+        f'dr.pill/mascots/{emotion_file_map[emotion]}.png',
+    ]
     
-    return abs_path
+    for path in possible_paths:
+        abs_path = os.path.join(script_dir, path)
+        if os.path.exists(abs_path):
+            return abs_path
+    
+    # If still not found, return None (will use emoji fallback)
+    return None
 
 def get_mascot_css_class(emotion):
     """Get CSS class for mascot animation"""
@@ -733,10 +787,10 @@ def render_pill_mascot(emotion, message, missed_list=None):
     else:
         # Fallback to emoji if image not found
         emoji_map = {
-            'happy': '😊',
-            'sad': '😢',
-            'urgent': '😰',
-            'sleepy': '😴'
+            'happy': '💊😊',
+            'sad': '💊😢',
+            'urgent': '💊😰',
+            'sleepy': '💊😴'
         }
         fallback_emoji = emoji_map.get(emotion, '💊')
         
@@ -746,7 +800,6 @@ def render_pill_mascot(emotion, message, missed_list=None):
                 {fallback_emoji}
             </div>
             <h2 style="color: #9c27b0; margin-top: 1rem;">{message}</h2>
-            <p style="color: #666;">(Mascot image not loaded - using emoji fallback)</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -759,7 +812,6 @@ def render_pill_mascot(emotion, message, missed_list=None):
                 <p>🕐 Scheduled for {med['time']}</p>
             </div>
             """, unsafe_allow_html=True)
-
 
 # ================= HELPER FUNCTIONS =================
 def get_medicine_status(medicine, time_slot, current_time, user_id):
@@ -783,30 +835,8 @@ def get_medicine_status(medicine, time_slot, current_time, user_id):
     
     return 'scheduled'
 
-
-# ================= SESSION STATE =================
-if "auth_mode" not in st.session_state:
-    st.session_state.auth_mode = None
-
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-if "page" not in st.session_state:
-    st.session_state.page = "home"
-
-if "cal_year" not in st.session_state:
-    today = date.today()
-    st.session_state.cal_year = today.year
-    st.session_state.cal_month = today.month
-
-if "edit_medicine_id" not in st.session_state:
-    st.session_state.edit_medicine_id = None
-
-if "cart" not in st.session_state:
-    st.session_state.cart = []
-
-if "orders" not in st.session_state:
-    st.session_state.orders = []
+# ================= INITIALIZE SESSION STATE =================
+init_session_state()
 
 # ================= TITLE ========================
 st.markdown(
@@ -1250,9 +1280,11 @@ elif st.session_state.user and st.session_state.page == "medicines_list":
                     st.markdown(f"**Color:** <span style='display:inline-block; width:30px; height:30px; background-color:{color}; border-radius:50%; vertical-align:middle;'></span>", unsafe_allow_html=True)
                 
                 with col2:
-                    # Calculate intake stats
-                    cursor.execute(f"SELECT COUNT(*) FROM tracking WHERE medicine_id={med_id} AND taken=1")
-                    total_intakes = cursor.fetchone()[0]
+                    # Calculate intake stats using session state
+                    total_intakes = 0
+                    for key, tracking in st.session_state.tracking_db.items():
+                        if key[0] == med_id and tracking['taken']:
+                            total_intakes += 1
                     st.metric("Total Taken", total_intakes)
                 
                 # Action buttons
@@ -1557,21 +1589,19 @@ elif st.session_state.user and st.session_state.page == "calendar":
                 for time_slot in med['times']:
                     total += 1
                     
-                    # Check if taken
-                    cursor.execute(
-                        "SELECT taken, timestamp FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
-                        (med['id'], selected_date, time_slot)
-                    )
-                    result = cursor.fetchone()
-                    is_taken = result[0] if result else False
+                    # Check if taken using session state
+                    key = (med['id'], selected_date, time_slot)
+                    is_taken = False
+                    taken_at = None
+                    
+                    if key in st.session_state.tracking_db:
+                        tracking = st.session_state.tracking_db[key]
+                        is_taken = tracking['taken']
+                        if tracking['timestamp']:
+                            taken_at = datetime.fromisoformat(tracking['timestamp']).strftime('%I:%M %p')
                     
                     if is_taken:
                         taken += 1
-                    
-                    # Get taken time
-                    taken_at = None
-                    if result and result[1]:
-                        taken_at = datetime.fromisoformat(result[1]).strftime('%I:%M %p')
                     
                     status = "✅ Taken" if is_taken else "⭕ Not Taken"
                     bg_color = "#d4edda" if is_taken else "#f8d7da"
@@ -1683,18 +1713,15 @@ elif st.session_state.user and st.session_state.page == "settings":
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        cursor.execute("SELECT COUNT(*) FROM tracking WHERE medicine_id IN (SELECT id FROM medicines WHERE user_id=?) AND taken=1", (user_id,))
-        total_intakes = cursor.fetchone()[0]
+        total_intakes = sum(1 for key, tracking in st.session_state.tracking_db.items() if tracking['taken'])
         st.metric("Total Medicines Taken", total_intakes)
     
     with col2:
-        cursor.execute("SELECT COUNT(*) FROM medicines WHERE user_id=? AND med_type='Daily (Ongoing)'", (user_id,))
-        total_daily = cursor.fetchone()[0]
+        total_daily = len([m for m in get_user_medicines(user_id) if m[4] == 'Daily (Ongoing)'])
         st.metric("Daily Medicines", total_daily)
     
     with col3:
-        cursor.execute("SELECT COUNT(*) FROM medicines WHERE user_id=? AND med_type='Date Range'", (user_id,))
-        total_date_range = cursor.fetchone()[0]
+        total_date_range = len([m for m in get_user_medicines(user_id) if m[4] == 'Date Range'])
         st.metric("Date Range Medicines", total_date_range)
     
     with col4:
@@ -1747,19 +1774,38 @@ elif st.session_state.user and st.session_state.page == "settings":
         with col1:
             if st.button("🗑️ Clear Intake History", type="secondary", use_container_width=True):
                 if st.checkbox("I understand this will delete all intake records"):
-                    cursor.execute("DELETE FROM tracking WHERE medicine_id IN (SELECT id FROM medicines WHERE user_id=?)", (user_id,))
-                    conn.commit()
+                    # Clear tracking for user's medicines
+                    user_meds = get_user_medicines(user_id)
+                    for med in user_meds:
+                        med_id = med[0]
+                        keys_to_delete = [k for k in st.session_state.tracking_db.keys() if k[0] == med_id]
+                        for key in keys_to_delete:
+                            del st.session_state.tracking_db[key]
                     st.success("All intake history cleared!")
                     st.rerun()
         
         with col2:
             if st.button("🗑️ Delete Account", type="secondary", use_container_width=True):
                 if st.checkbox("I understand this will delete ALL my data"):
-                    cursor.execute("DELETE FROM tracking WHERE medicine_id IN (SELECT id FROM medicines WHERE user_id=?)", (user_id,))
-                    cursor.execute("DELETE FROM medicines WHERE user_id=?", (user_id,))
-                    cursor.execute("DELETE FROM settings WHERE user_id=?", (user_id,))
-                    cursor.execute("DELETE FROM users WHERE id=?", (user_id,))
-                    conn.commit()
+                    # Delete all user data
+                    user = st.session_state.users_db.get(st.session_state.user[2], {})
+                    if user:
+                        del st.session_state.users_db[st.session_state.user[2]]
+                    
+                    if user_id in st.session_state.medicines_db:
+                        del st.session_state.medicines_db[user_id]
+                    
+                    if user_id in st.session_state.settings_db:
+                        del st.session_state.settings_db[user_id]
+                    
+                    # Delete tracking records
+                    user_meds = get_user_medicines(user_id)
+                    for med in user_meds:
+                        med_id = med[0]
+                        keys_to_delete = [k for k in st.session_state.tracking_db.keys() if k[0] == med_id]
+                        for key in keys_to_delete:
+                            del st.session_state.tracking_db[key]
+                    
                     st.session_state.user = None
                     st.session_state.auth_mode = None
                     st.session_state.page = "home"
@@ -1974,4 +2020,4 @@ if st.session_state.user:
         st.session_state.user = None
         st.session_state.auth_mode = None
         st.session_state.page = "home"
-        st.rerun
+        st.rerun()
