@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, time
 import calendar
 import json
 import plotly.graph_objects as go
-from typing import
+
 # ================= SESSION STATE INITIALIZATION =================
 def init_session_state():
     """Initialize all session state variables for data persistence"""
@@ -619,3 +619,4 @@ def get_medicine_status(medicine, time_slot, current_time, user_id):
 
 # ================= STYLES (Same as original) =================
 # Add your existing styles here
+
