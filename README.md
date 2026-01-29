@@ -251,6 +251,79 @@ Your adherence is calculated based on the percentage of scheduled doses taken:
 
 🔴 <60%: Poor (needs attention)
 
+Streamlit Cloud (Recommended)
+
+Prerequisites
+
+GitHub account
+
+Streamlit Cloud account (free)
+
+Step-by-Step Deployment
+
+1. Prepare Your Repository
+
+# Create .streamlit directory
+mkdir .streamlit
+
+# Create .streamlit/config.toml
+cat > .streamlit/config.toml << EOF
+
+[server]
+
+port = 8501
+
+headless = true
+
+enableCORS = false
+
+enableXsrfProtection = false
+
+
+
+[browser]
+
+gatherUsageStats = false
+
+EOF
+
+2. Create requirements.txt
+
+
+
+streamlit>=1.28.0
+
+plotly>=5.17.0
+
+3. Push to GitHub
+
+
+
+
+git add .
+
+
+git commit -m "Initial commit"
+
+git branch -M main
+
+git remote add origin https://github.com/yourusername/dr-pill-medicine-tracker.git
+
+git push -u origin main
+
+4. Deploy to Streamlit Cloud
+
+Go to share.streamlit.io
+
+Click "New app"
+
+Connect your GitHub repository
+
+Select your repository and branch
+
+Set Main file path: DR_PILLS_Fixed.py
+
+Click "Deploy"
 
 
 APP REVIEW:
