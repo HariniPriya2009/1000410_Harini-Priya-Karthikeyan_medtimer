@@ -11,6 +11,7 @@ Live Demo:https://1000410-harini-priya-karthikeyan-drpill.streamlit.app/
 Features:
 
 Dashboard:
+
 Real-time medicine tracking with visual status indicators
 
 Interactive mascot that reacts to your medication adherence
@@ -31,7 +32,7 @@ Health condition tracking
 
 Contact information management
 
-Medicine Management:
+**Medicine Management:**
 
 Add unlimited medicines with custom dosages
 
