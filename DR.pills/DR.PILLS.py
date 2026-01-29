@@ -2083,5 +2083,6 @@ if st.session_state.user:
         st.rerun()
 
 st.markdown("---")
-st.markdown("### 📝 Database Information")
+
+
 
