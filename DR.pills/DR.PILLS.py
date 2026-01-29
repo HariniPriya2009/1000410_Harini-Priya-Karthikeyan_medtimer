@@ -1768,24 +1768,8 @@ elif st.session_state.user and st.session_state.page == "settings":
     st.markdown("## 📊 Your Statistics")
     
     stats = get_adherence_stats(user_id)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_intakes = sum(1 for key, tracking in st.session_state.tracking_db.items() if tracking['taken'])
-        st.metric("Total Medicines Taken", total_intakes)
-    
-    with col2:
-        total_daily = len([m for m in get_user_medicines(user_id) if m[4] == 'Daily (Ongoing)'])
-        st.metric("Daily Medicines", total_daily)
-    
-    with col3:
-        total_date_range = len([m for m in get_user_medicines(user_id) if m[4] == 'Date Range'])
-        st.metric("Date Range Medicines", total_date_range)
-    
-    with col4:
-        st.metric("Active Medicines", stats['active_medicines'])
-    
+        
+   
     # Overall adherence
     st.markdown("---")
     st.markdown("### 🎯 30-Day Adherence Rate")
@@ -2083,6 +2067,7 @@ if st.session_state.user:
         st.rerun()
 
 st.markdown("---")
+
 
 
 
