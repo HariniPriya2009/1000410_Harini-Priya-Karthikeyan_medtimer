@@ -7,7 +7,6 @@ import calendar
 import json
 import os
 import plotly.graph_objects as go
-from typing import List, Dict, Optional
 import sqlite3
 
 # ================= PAGE CONFIG =================
@@ -279,20 +278,12 @@ st.markdown("""
 # ================= DATABASE CONFIGURATION =================
 
 # Use a persistent database file that won't be reset on Streamlit Cloud
-DB_PATH = "/home/user/.streamlit/drpill.db"
+DB_PATH = "drpill.db"
 
 def get_db_connection():
     """Create database connection"""
-    try:
-        # Try to use home directory first (more persistent)
-        import tempfile
-        temp_dir = tempfile.gettempdir()
-        db_path = os.path.join(temp_dir, "drpill.db")
-    except:
-        # Fallback to current directory
-        db_path = "drpill.db"
-    
-    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     return conn
 
 def init_database():
@@ -402,7 +393,10 @@ def login_user(email, password):
     user = cursor.fetchone()
     conn.close()
     
-    return user
+    if user:
+        return (user['id'], user['name'], user['email'], user['password'],
+               user['age'], user['conditions'], user['phone'], user['email_address'])
+    return None
 
 def get_user_by_id(user_id):
     """Get user by ID"""
@@ -413,7 +407,10 @@ def get_user_by_id(user_id):
     user = cursor.fetchone()
     conn.close()
     
-    return user
+    if user:
+        return (user['id'], user['name'], user['email'], user['password'],
+               user['age'], user['conditions'], user['phone'], user['email_address'])
+    return None
 
 def update_user(user_id, name, age, conditions, phone, email_address):
     """Update user information"""
@@ -453,7 +450,14 @@ def get_user_medicines(user_id):
     medicines = cursor.fetchall()
     conn.close()
     
-    return medicines
+    result = []
+    for med in medicines:
+        result.append((
+            med['id'], med['user_id'], med['name'], med['dosage'],
+            med['med_type'], med['times'], med['time_labels'], med['notes'],
+            med['start_date'], med['end_date'], med['paused'], med['color']
+        ))
+    return result
 
 def get_medicine_by_id(med_id):
     """Get medicine by ID"""
@@ -464,7 +468,13 @@ def get_medicine_by_id(med_id):
     med = cursor.fetchone()
     conn.close()
     
-    return med
+    if med:
+        return (
+            med['id'], med['user_id'], med['name'], med['dosage'],
+            med['med_type'], med['times'], med['time_labels'], med['notes'],
+            med['start_date'], med['end_date'], med['paused'], med['color']
+        )
+    return None
 
 def update_medicine(med_id, name, dosage, med_type, times, time_labels, notes, start_date, end_date, color):
     """Update medicine"""
@@ -540,7 +550,8 @@ def toggle_intake(medicine_id, target_date, time_slot):
     result = cursor.fetchone()
     
     if result:
-        track_id, taken = result
+        track_id = result['id']
+        taken = result['taken']
         cursor.execute(
             "UPDATE tracking SET taken=?, timestamp=? WHERE id=?",
             (not taken, datetime.now() if not taken else None, track_id)
@@ -566,7 +577,29 @@ def get_intake_status(medicine_id, target_date, time_slot):
     result = cursor.fetchone()
     conn.close()
     
-    return result[0] if result else False
+    return result['taken'] if result else False
+
+def get_tracking_records_for_medicine(med_id):
+    """Get all tracking records for a specific medicine"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM tracking WHERE medicine_id=?", (med_id,))
+    records = cursor.fetchall()
+    conn.close()
+    
+    return records
+
+def get_total_taken_count(med_id):
+    """Get total number of times a medicine was taken"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT COUNT(*) as count FROM tracking WHERE medicine_id=? AND taken=1", (med_id,))
+    result = cursor.fetchone()
+    conn.close()
+    
+    return result['count'] if result else 0
 
 def calculate_adherence(user_id, target_date):
     """Calculate adherence percentage"""
@@ -652,8 +685,8 @@ def get_settings(user_id):
     
     if result:
         return {
-            'reminders_enabled': result[1],
-            'reminder_advance_minutes': result[2]
+            'reminders_enabled': result['reminders_enabled'],
+            'reminder_advance_minutes': result['reminder_advance_minutes']
         }
     else:
         # Create default settings
@@ -711,28 +744,41 @@ def get_upcoming_reminders(user_id):
     
     return sorted(upcoming, key=lambda x: x['minutes_until'])
 
+def get_all_tracking_records(user_id):
+    """Get all tracking records for a user"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT t.* FROM tracking t
+        JOIN medicines m ON t.medicine_id = m.id
+        WHERE m.user_id = ?
+    """, (user_id,))
+    
+    records = cursor.fetchall()
+    conn.close()
+    
+    return records
+
+def clear_tracking_for_medicines(user_id):
+    """Clear all tracking records for user's medicines"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        DELETE FROM tracking
+        WHERE medicine_id IN (SELECT id FROM medicines WHERE user_id = ?)
+    """, (user_id,))
+    
+    conn.commit()
+    conn.close()
+
 def export_user_data(user_id):
     """Export user data as JSON"""
     user = get_user_by_id(user_id)
     medicines = get_user_medicines(user_id)
     
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    tracking_data = []
-    for med in medicines:
-        cursor.execute("SELECT * FROM tracking WHERE medicine_id=?", (med[0],))
-        tracking_records = cursor.fetchall()
-        for t in tracking_records:
-            tracking_data.append({
-                'medicine_id': t[1],
-                'date': t[2],
-                'time_slot': t[3],
-                'taken': t[4],
-                'timestamp': t[5]
-            })
-    
-    conn.close()
+    tracking_records = get_all_tracking_records(user_id)
     
     data = {
         'user': {
@@ -759,9 +805,39 @@ def export_user_data(user_id):
             }
             for m in medicines
         ],
-        'tracking': tracking_data
+        'tracking': [
+            {
+                'id': t['id'],
+                'medicine_id': t['medicine_id'],
+                'date': t['date'],
+                'time_slot': t['time_slot'],
+                'taken': t['taken'],
+                'timestamp': t['timestamp']
+            }
+            for t in tracking_records
+        ]
     }
     return json.dumps(data, indent=2)
+
+def delete_user_account(user_id):
+    """Delete user account and all associated data"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Delete all tracking records for user's medicines
+    cursor.execute("DELETE FROM tracking WHERE medicine_id IN (SELECT id FROM medicines WHERE user_id=?)", (user_id,))
+    
+    # Delete all medicines
+    cursor.execute("DELETE FROM medicines WHERE user_id=?", (user_id,))
+    
+    # Delete settings
+    cursor.execute("DELETE FROM settings WHERE user_id=?", (user_id,))
+    
+    # Delete user
+    cursor.execute("DELETE FROM users WHERE id=?", (user_id,))
+    
+    conn.commit()
+    conn.close()
 
 # ================= MASCOT CONFIGURATION =================
 
@@ -887,6 +963,12 @@ if "cart" not in st.session_state:
 if "orders" not in st.session_state:
     st.session_state.orders = []
 
+if "view_day_details" not in st.session_state:
+    st.session_state.view_day_details = False
+
+if "selected_date" not in st.session_state:
+    st.session_state.selected_date = None
+
 # ================= TITLE ========================
 st.markdown(
     "<h2 style='text-align:center;color:#9b59b6;'>Dr.Pill – Your health journey begins here 🌸</h2>",
@@ -954,10 +1036,6 @@ elif st.session_state.auth_mode == "login":
     if st.button("⬅ Back"):
         st.session_state.auth_mode = None
         st.rerun()
-
-# ================= MAIN APP (REST OF THE CODE IS THE SAME AS BEFORE) =================
-# [Copy the rest of the app code from app_fixed.py - it's exactly the same]
-# The only difference is we're using SQLite database functions instead of session state
 
 # ================= MAIN APP =================
 elif st.session_state.user and st.session_state.page == "home":
@@ -1143,11 +1221,6 @@ elif st.session_state.user and st.session_state.page == "home":
             <p style="font-size: 1.5rem;">You're doing fantastic! Keep it up! 💪✨</p>
         </div>
         """, unsafe_allow_html=True)
-
-# ================= REST OF THE APP PAGES (Profile, Add Medicine, Medicines List, Calendar, Settings, Shop) =================
-# [The code for these pages is the same as in app_fixed.py, just using SQLite functions instead of session state]
-# Due to length limits, you'll need to copy the remaining pages from app_fixed.py
-# All the function calls (get_user_medicines, save_medicine, etc.) work exactly the same!
 
 # ================= PROFILE PAGE =================
 elif st.session_state.user and st.session_state.page == "profile":
@@ -1339,11 +1412,8 @@ elif st.session_state.user and st.session_state.page == "medicines_list":
                     st.markdown(f"**Color:** <span style='display:inline-block; width:30px; height:30px; background-color:{color}; border-radius:50%; vertical-align:middle;'></span>", unsafe_allow_html=True)
                 
                 with col2:
-                    # Calculate intake stats using session state
-                    total_intakes = 0
-                    for key, tracking in st.session_state.tracking_db.items():
-                        if key[0] == med_id and tracking['taken']:
-                            total_intakes += 1
+                    # Calculate intake stats using SQLite
+                    total_intakes = get_total_taken_count(med_id)
                     st.metric("Total Taken", total_intakes)
                 
                 # Action buttons
@@ -1630,7 +1700,7 @@ elif st.session_state.user and st.session_state.page == "calendar":
                 st.session_state.cal_year += 1
             else:
                 st.session_state.cal_month += 1
-            st.rerun()
+                st.rerun()
 
     # Day Details View (if clicked)
     if st.session_state.get('view_day_details', False):
@@ -1648,19 +1718,23 @@ elif st.session_state.user and st.session_state.page == "calendar":
                 for time_slot in med['times']:
                     total += 1
                     
-                    # Check if taken using session state
-                    key = (med['id'], selected_date, time_slot)
-                    is_taken = False
+                    # Check if taken using SQLite
+                    is_taken = get_intake_status(med['id'], selected_date, time_slot)
                     taken_at = None
-                    
-                    if key in st.session_state.tracking_db:
-                        tracking = st.session_state.tracking_db[key]
-                        is_taken = tracking['taken']
-                        if tracking['timestamp']:
-                            taken_at = datetime.fromisoformat(tracking['timestamp']).strftime('%I:%M %p')
                     
                     if is_taken:
                         taken += 1
+                        # Get timestamp from database
+                        conn = get_db_connection()
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "SELECT timestamp FROM tracking WHERE medicine_id=? AND date=? AND time_slot=?",
+                            (med['id'], selected_date, time_slot)
+                        )
+                        result = cursor.fetchone()
+                        conn.close()
+                        if result and result['timestamp']:
+                            taken_at = datetime.fromisoformat(result['timestamp']).strftime('%I:%M %p')
                     
                     status = "✅ Taken" if is_taken else "⭕ Not Taken"
                     bg_color = "#d4edda" if is_taken else "#f8d7da"
@@ -1768,8 +1842,25 @@ elif st.session_state.user and st.session_state.page == "settings":
     st.markdown("## 📊 Your Statistics")
     
     stats = get_adherence_stats(user_id)
-        
-   
+    tracking_records = get_all_tracking_records(user_id)
+    total_intakes = sum(1 for t in tracking_records if t['taken'])
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Medicines Taken", total_intakes)
+    
+    with col2:
+        total_daily = len([m for m in get_user_medicines(user_id) if m[4] == 'Daily (Ongoing)'])
+        st.metric("Daily Medicines", total_daily)
+    
+    with col3:
+        total_date_range = len([m for m in get_user_medicines(user_id) if m[4] == 'Date Range'])
+        st.metric("Date Range Medicines", total_date_range)
+    
+    with col4:
+        st.metric("Active Medicines", stats['active_medicines'])
+    
     # Overall adherence
     st.markdown("---")
     st.markdown("### 🎯 30-Day Adherence Rate")
@@ -1817,38 +1908,14 @@ elif st.session_state.user and st.session_state.page == "settings":
         with col1:
             if st.button("🗑️ Clear Intake History", type="secondary", use_container_width=True):
                 if st.checkbox("I understand this will delete all intake records"):
-                    # Clear tracking for user's medicines
-                    user_meds = get_user_medicines(user_id)
-                    for med in user_meds:
-                        med_id = med[0]
-                        keys_to_delete = [k for k in st.session_state.tracking_db.keys() if k[0] == med_id]
-                        for key in keys_to_delete:
-                            del st.session_state.tracking_db[key]
+                    clear_tracking_for_medicines(user_id)
                     st.success("All intake history cleared!")
                     st.rerun()
         
         with col2:
             if st.button("🗑️ Delete Account", type="secondary", use_container_width=True):
                 if st.checkbox("I understand this will delete ALL my data"):
-                    # Delete all user data
-                    user = st.session_state.users_db.get(st.session_state.user[2], {})
-                    if user:
-                        del st.session_state.users_db[st.session_state.user[2]]
-                    
-                    if user_id in st.session_state.medicines_db:
-                        del st.session_state.medicines_db[user_id]
-                    
-                    if user_id in st.session_state.settings_db:
-                        del st.session_state.settings_db[user_id]
-                    
-                    # Delete tracking records
-                    user_meds = get_user_medicines(user_id)
-                    for med in user_meds:
-                        med_id = med[0]
-                        keys_to_delete = [k for k in st.session_state.tracking_db.keys() if k[0] == med_id]
-                        for key in keys_to_delete:
-                            del st.session_state.tracking_db[key]
-                    
+                    delete_user_account(user_id)
                     st.session_state.user = None
                     st.session_state.auth_mode = None
                     st.session_state.page = "home"
@@ -2067,7 +2134,3 @@ if st.session_state.user:
         st.rerun()
 
 st.markdown("---")
-
-
-
-
