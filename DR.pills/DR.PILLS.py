@@ -866,7 +866,7 @@ elif st.session_state.auth_mode == "signup":
         age = st.number_input("Age 🎂", min_value=1, max_value=120, value=25)
         conditions = st.text_input("Health Conditions (Optional) 🏥", placeholder="e.g., High BP, Diabetes")
         phone = st.text_input("Phone Number (Optional) 📱", placeholder="+1 (555) 123-4567")
-        email_address = st.text_input("Email Address (Optional) 📧", placeholder="your.email@example.com")
+       
         
         submit = st.form_submit_button("Sign Up 🚀")
 
@@ -1109,7 +1109,7 @@ elif st.session_state.user and st.session_state.page == "profile":
             phone = st.text_input("Phone Number 📱", value=user[6] if user[6] else "")
         
         with col2:
-            email_address = st.text_input("Email Address 📧", value=user[7] if user[7] else "")
+            
             conditions = st.text_input("Health Conditions (Optional) 🏥", 
                                       value=user[5] if user[5] else "",
                                       placeholder="e.g., High BP, Diabetes, etc.")
@@ -1266,7 +1266,7 @@ elif st.session_state.user and st.session_state.page == "medicines_list":
             
             time_slots = [t.strip() for t in times_str.split(",") if t.strip()]
             time_labels_list = [l.strip() for l in time_labels_str.split(",") if l.strip()] if time_labels_str else [""] * len(time_slots)
-            times_display = ", ".join([f"{t} ({l})" for t, l in zip(time_slots, time_labels_list)])
+            
             
             with st.expander(f"💊 {name} - {status_text}", expanded=False):
                 col1, col2 = st.columns([2, 1])
@@ -1274,7 +1274,7 @@ elif st.session_state.user and st.session_state.page == "medicines_list":
                 with col1:
                     st.markdown(f"**Dosage:** {dosage}")
                     st.markdown(f"**Type:** {type_text}")
-                    st.markdown(f"**Times:** {times_display}")
+                    
                     if notes:
                         st.markdown(f"**Notes:** {notes}")
                     st.markdown(f"**Color:** <span style='display:inline-block; width:30px; height:30px; background-color:{color}; border-radius:50%; vertical-align:middle;'></span>", unsafe_allow_html=True)
@@ -2021,3 +2021,4 @@ if st.session_state.user:
         st.session_state.auth_mode = None
         st.session_state.page = "home"
         st.rerun()
+
