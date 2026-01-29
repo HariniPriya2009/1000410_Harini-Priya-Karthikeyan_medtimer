@@ -251,4 +251,14 @@ Your adherence is calculated based on the percentage of scheduled doses taken:
 
 🔴 <60%: Poor (needs attention)
 
- 
+
+
+APP REVIEW:
+
+Friend:
+
+really liked using Dr. Pills. It’s a simple and helpful app that makes medicine tracking easy. The pill mascots with different emotions clearly show whether a medicine is taken, missed, or pending, which makes the app engaging and easy to understand. The interface is clean and user-friendly, so anyone can use it without confusion. Overall, it’s a smart and practical app with great real-life usefulness.
+
+Sister:
+
+As her sister, I’m really proud of Dr. Pills. She got the idea for this app after seeing our grandma struggle to remember her medicines, and she turned that problem into a simple and meaningful solution. The app is easy to use, practical, and clearly made with care. It’s not just a project, but something created with real love and purpose.
