@@ -866,7 +866,7 @@ elif st.session_state.auth_mode == "signup":
         age = st.number_input("Age 🎂", min_value=1, max_value=120, value=25)
         conditions = st.text_input("Health Conditions (Optional) 🏥", placeholder="e.g., High BP, Diabetes")
         phone = st.text_input("Phone Number (Optional) 📱", placeholder="+1 (555) 123-4567")
-       
+        email_address = st.text_input("Email Address (Optional) 📧", placeholder="your.email@example.com")
         
         submit = st.form_submit_button("Sign Up 🚀")
 
@@ -1109,7 +1109,7 @@ elif st.session_state.user and st.session_state.page == "profile":
             phone = st.text_input("Phone Number 📱", value=user[6] if user[6] else "")
         
         with col2:
-            
+            email_address = st.text_input("Email Address 📧", value=user[7] if user[7] else "")
             conditions = st.text_input("Health Conditions (Optional) 🏥", 
                                       value=user[5] if user[5] else "",
                                       placeholder="e.g., High BP, Diabetes, etc.")
@@ -2021,4 +2021,5 @@ if st.session_state.user:
         st.session_state.auth_mode = None
         st.session_state.page = "home"
         st.rerun()
+
 
