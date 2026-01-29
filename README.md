@@ -6,6 +6,4 @@ A user-friendly medicine reminder and adherence tracking web application built u
 
 Medication non-adherence is a widespread issue, especially among students, elderly individuals, and patients taking multiple medicines daily. Forgetting or delaying doses can reduce treatment effectiveness and impact health.
 
-Live Demo
-
-https://1000410harini-priya-karthikeyandrpill-fppg4f8gxbgj5exohudqdx.streamlit.app/
+Live Demo:https://1000410-harini-priya-karthikeyan-drpill.streamlit.app/
