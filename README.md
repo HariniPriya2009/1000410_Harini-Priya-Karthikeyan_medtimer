@@ -335,3 +335,14 @@ really liked using Dr. Pills. It’s a simple and helpful app that makes medicin
 Sister:
 
 As her sister, I’m really proud of Dr. Pills. She got the idea for this app after seeing our grandma struggle to remember her medicines, and she turned that problem into a simple and meaningful solution. The app is easy to use, practical, and clearly made with care. It’s not just a project, but something created with real love and purpose.
+
+
+Credits
+
+Created by: Harini Priya Karthikeyan (ID: 1000410)
+
+Course: Artificial Intelligence: Real-World Applications and Implications
+
+Mentor: Syed Ali Beema.S
+
+School: Jain Vidyalaya IB world school, Madurai
