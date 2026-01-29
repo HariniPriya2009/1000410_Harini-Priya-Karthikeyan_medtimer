@@ -248,3 +248,5 @@ Your adherence is calculated based on the percentage of scheduled doses taken:
 🟡 60-79%: Good (needs improvement)
 
 🔴 <60%: Poor (needs attention)
+
+ 
